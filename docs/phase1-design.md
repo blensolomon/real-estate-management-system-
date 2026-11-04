@@ -39,7 +39,7 @@ erDiagram
   LeadActivity { ActivityType type "CALL|MESSAGE|NOTE|SITE_VISIT|STATUS_CHANGE|REASSIGNED"; string note; datetime at "immutable" }
   Task { datetime dueAt; string note; datetime doneAt; string assigneeId }
   Client { string fullName; string phone "unique per company"; string idNumber }
-  Reservation { decimal depositAmount; bool depositConfirmed; datetime expiresAt; ReservationStatus status "ACTIVE|EXPIRED|CANCELLED|CONVERTED" }
+  Reservation { decimal depositAmount; datetime depositConfirmedAt "held after expiry when set"; datetime expiresAt; ReservationStatus status "ACTIVE|EXPIRED|CANCELLED|CONVERTED" }
   Sale { string contractNo "unique per company"; decimal listPrice; decimal price; decimal commissionRate; SaleStatus status "ACTIVE|COMPLETED|CANCELLED"; string cancelReason }
   PaymentPlan { PlanType type "CASH|INSTALLMENT|MORTGAGE"; decimal downPayment; int months; string bankName }
   Installment { int seq; string label; date dueDate; decimal amount }
@@ -56,8 +56,8 @@ Rules carried by the schema (section 7):
 - Every table has `companyId`; every query filters on it. **Built**
 - No hard deletes of financial rows: sales are cancelled with a reason, payments are rejected/voided with a reason. **Change**
 - Confirmed payments can't be edited; a correction is a new reversal payment linked to the original (needs accountant confirmation too). **New**
-- Price below list price by more than `discountApprovalPct` creates a PriceApproval; the sale can't be signed until a Sales Manager/Owner approves. **New**
-- Lead owner is locked to the agent who registered it; only Admin/Owner can override, always audited. **Change** (today Sales Managers can reassign)
+- Price below list price by more than `discountApprovalPct` creates a PriceApproval; the sale can't be signed until a Sales Manager/Owner approves (their own sales are recorded as self-approved). **Built**
+- Lead owner is locked to the agent who registered it; only Admin/Owner can override, always audited. Sales Managers can only assign leads with no owner. **Built**
 - Audit log records before/after for price, status, payment and delete/void changes. **Change** (today: action + short detail)
 
 ## 2. Screens (Phase 1)
@@ -110,3 +110,10 @@ Mutations are Next.js server actions, validated with Zod and checked against rol
 ## 5. Stack choices
 - As suggested: Next.js + TypeScript, Tailwind, PostgreSQL + Prisma migrations, Zod, Recharts for the two home charts, S3-compatible storage (MinIO locally), server-side PDF generation, cron route for expiry and reminders.
 - shadcn/ui: I'd use it for new forms, dialogs and the Kanban board, and keep the existing simple Tailwind components rather than rewriting working screens.
+
+## Decisions confirmed by the product owner
+
+- Confirmed reservation deposit: unit stays held after expiry until the Sales Manager extends, converts or cancels (with a reason). The deposit counts toward the price; refunds are handled outside the system.
+- Discount approval threshold defaults to 5% below list; approvers are Sales Manager or Owner.
+- Only Owner/Admin can move an owned lead.
+- Milestone-based schedules and late penalties are Phase 2.

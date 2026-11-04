@@ -9,9 +9,9 @@ so owners know who owes them money, who sold what, and which units are really av
 | Problem | How it is solved |
 | --- | --- |
 | Collections | Deals carry an installment schedule. Payments recorded by agents stay **pending** until the Accountant confirms them; confirming issues a numbered, printable receipt (bank / Telebirr reference + receipt upload, duplicate-reference check). Confirmed payments are applied oldest-installment-first; the Collections page shows overdue amounts, days overdue and an aging report (1–30 / 31–60 / 61–90 / 90+). |
-| Agent control | Every lead has an owner; agents only see their own leads, reservations and deals. Activities are timestamped and immutable. Follow-ups are tracked with overdue flags; managers can reassign leads (logged). |
+| Agent control | Every lead has an owner; agents only see their own leads, reservations and deals. Activities are timestamped and immutable. Follow-ups are tracked with overdue flags; managers can reassign leads (logged). Only the Owner or Admin can move an owned lead. |
 | Commission disputes | Commission % is set per project and frozen on the deal. Commission is earned at signing but becomes **payable in proportion to confirmed buyer payments**. Payouts are recorded and per-agent statements are available. |
-| Double-selling | Unit status changes via conditional updates inside transactions, plus partial unique indexes (one active reservation and one live deal per unit). Reservations expire automatically after the company's hold period. |
+| Double-selling | Unit status changes via conditional updates inside transactions, plus partial unique indexes (one active reservation and one live deal per unit). Reservations expire automatically after the company's hold period. A reservation whose deposit the accountant confirmed is not released at expiry; it stays held until a manager extends, converts or cancels it. |
 | Lead loss | Source tracking (Facebook, Telegram, TikTok, walk-in, referral…), unique phone per company, a follow-up created for every new lead and automatically after each site visit, and a list of open leads with no next step. |
 | Scattered documents | Contracts, IDs, receipts and other files are stored per client and deal (PDF/images, 10 MB). |
 | No visibility | Live owner dashboard: overdue, outstanding, pending confirmations, monthly collections, inventory, expiring reservations, overdue follow-ups, sales by agent, lead sources and pipeline. Full audit log. |
@@ -23,7 +23,7 @@ so owners know who owes them money, who sold what, and which units are really av
 | Role | Can do |
 |---|---|
 | Owner | Everything. |
-| Sales Manager | Leads, follow-ups, reassignment, reservations, monthly sales targets; sees all sales and money reports. |
+| Sales Manager | Leads (can assign unowned leads), follow-ups, reservations, price approvals, monthly sales targets; sees all sales and money reports. |
 | Agent / Broker | Only their own leads, clients, reservations, sales and commissions. Can be flagged as an external broker. |
 | Accountant | Confirms or rejects payments (issues receipts), approves commissions and marks them paid. No access to leads. |
 | Admin | Users, projects/units and company settings (language, reservation length, "quiet lead" days). No access to money reports. |
@@ -56,7 +56,7 @@ npm run dev                   # http://localhost:3000
 Demo logins (password `password123`): `owner@demo.et`, `manager@demo.et`, `accountant@demo.et`, `admin@demo.et`, `agent@demo.et`, `broker@demo.et` (external broker).
 New companies can sign up at `/register`.
 
-Reservations are expired whenever relevant pages load. For timely expiry in production, schedule:
+Reservations without a confirmed deposit are expired whenever relevant pages load. Prices more than the company's discount limit (default 5%) below list wait in **Price approvals** for the Sales Manager or Owner. For timely expiry in production, schedule:
 `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/expire-reservations`.
 
 ## Environment variables
