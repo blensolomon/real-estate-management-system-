@@ -1,3 +1,5 @@
+import { saveChecklist } from "./checklist-actions";
+import { DOC_TYPES } from "@/lib/checklist";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { ADMINS } from "@/lib/permissions";
@@ -13,9 +15,10 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const s = await requireSession(ADMINS);
   const sp = await searchParams;
   const admin = canAdmin(s.role);
-  const [company, users] = await Promise.all([
+  const [company, users, requirements] = await Promise.all([
     db.company.findUniqueOrThrow({ where: { id: s.companyId } }),
     db.user.findMany({ where: { companyId: s.companyId }, include: { _count: { select: { leads: true, deals: true } } }, orderBy: [{ active: "desc" }, { name: "asc" }] }),
+    db.documentRequirement.findMany({ where: { companyId: s.companyId } }),
   ]);
   return (
     <div className="space-y-6">
@@ -74,6 +77,22 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
           <SubmitButton className="btn-secondary" confirm="Move all open leads?">Move leads</SubmitButton>
         </form>
       )}
+      <form action={saveChecklist} className="card mb-6 max-w-3xl space-y-3">
+        <h2 className="h2">Documents every sale should have</h2>
+        <p className="muted">Sales missing any of these show a warning on the sale page. Missing documents never block a sale or a receipt.</p>
+        {DOC_TYPES.map((t) => {
+          const r = requirements.find((x) => x.type === t);
+          return (
+            <label key={t} className="flex min-h-11 flex-wrap items-center gap-3 text-sm">
+              <input type="checkbox" name={`req_${t}`} defaultChecked={!!r} className="h-5 w-5" />
+              <span className="w-32">{label(t)}</span>
+              <input name={`label_${t}`} defaultValue={r?.label ?? ""} placeholder="Shown name (optional)" className="input min-w-0 flex-1" />
+            </label>
+          );
+        })}
+        <SubmitButton className="btn-secondary">Save checklist</SubmitButton>
+      </form>
+
       <form action={addUser} className="card grid max-w-3xl gap-3 md:grid-cols-3">
         <div className="md:col-span-3"><h2 className="h2">Add team member</h2></div>
         <div><label className="lbl">Name</label><input name="name" className="input" required /></div>
