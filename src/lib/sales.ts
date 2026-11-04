@@ -3,6 +3,7 @@ import { audit } from "./audit";
 import { buildPlanSchedule, type PlanInput } from "./finance";
 import { seesAll } from "./permissions";
 import { RuleError, isUniqueViolation, type Actor } from "./rules";
+import { checkPrice } from "./approvals";
 
 export type SaleInput = {
   reservationId: string;
@@ -32,6 +33,8 @@ export async function createSale(actor: Actor, input: SaleInput) {
   if (!input.contractNo.trim()) throw new RuleError("Enter the contract number");
   const plan = { ...input.plan, downPct: input.plan.type === "CASH" ? 100 : input.plan.downPct, months: input.plan.type === "CASH" ? 0 : input.plan.months };
   validatePlan(input.price, plan);
+  const listPrice = Number(r.unit.price);
+  const priceCheck = await checkPrice(actor, r.id, listPrice, input.price);
   try {
     return await db.$transaction(async (tx) => {
       const flipped = await tx.unit.updateMany({ where: { id: r.unitId, status: "RESERVED" }, data: { status: "SOLD" } });
@@ -53,13 +56,17 @@ export async function createSale(actor: Actor, input: SaleInput) {
         },
       });
       if (Number(r.depositAmount) > 0) {
+        // The deposit counts toward the price. If the accountant already confirmed it, it arrives confirmed with a receipt number.
+        const confirmed = r.depositConfirmedAt
+          ? { status: "CONFIRMED" as const, confirmedById: r.depositConfirmedById, confirmedAt: r.depositConfirmedAt, receiptNo: (await tx.company.update({ where: { id: actor.companyId }, data: { receiptSeq: { increment: 1 } } })).receiptSeq }
+          : {};
         await tx.payment.create({
-          data: { companyId: actor.companyId, dealId: deal.id, amount: r.depositAmount, paidAt: r.createdAt, method: "OTHER", reference: `Reservation deposit ${r.id.slice(-6)}`, recordedById: actor.userId },
+          data: { companyId: actor.companyId, dealId: deal.id, amount: r.depositAmount, paidAt: r.depositConfirmedAt ?? r.createdAt, method: "OTHER", reference: r.depositRef ?? `Reservation deposit ${r.id.slice(-6)}`, recordedById: actor.userId, ...confirmed },
         });
       }
       const client = await tx.client.findUnique({ where: { id: r.clientId } });
       if (client?.leadId) await tx.lead.update({ where: { id: client.leadId }, data: { status: "WON", lastActivityAt: new Date() } });
-      await audit(actor, "deal.created", "Deal", deal.id, `${input.contractNo} · ${r.unit.project.name} ${r.unit.code} · ${input.price}`, { after: { price: input.price, listPrice: Number(r.unit.price), plan: plan.type } }, tx);
+      await audit(actor, "deal.created", "Deal", deal.id, `${input.contractNo} · ${r.unit.project.name} ${r.unit.code} · ${input.price}`, { after: { price: input.price, listPrice, plan: plan.type, discountPct: Number(priceCheck.pct.toFixed(2)), priceApprovalId: priceCheck.approvalId, selfApproved: "selfApproved" in priceCheck } }, tx);
       return deal;
     });
   } catch (e) {

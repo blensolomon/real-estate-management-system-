@@ -7,6 +7,7 @@ import { requireSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { back, num, str } from "@/lib/actions-util";
 import { RuleError } from "@/lib/rules";
+import { NeedsApprovalError, requestPriceApproval } from "@/lib/approvals";
 import { createSale } from "@/lib/sales";
 import { confirmPayment, rejectPayment, reversePayment, voidPayment } from "@/lib/payments";
 import { seesAll, SALES, ACCOUNTS, FINANCE_VIEW } from "@/lib/permissions";
@@ -35,6 +36,15 @@ export async function createDeal(fd: FormData) {
     });
     dealId = deal.id;
   } catch (e) {
+    if (e instanceof NeedsApprovalError) {
+      try {
+        await requestPriceApproval(s, reservationId, num(fd, "price"), str(fd, "priceReason"));
+      } catch (e2) {
+        if (e2 instanceof RuleError) back(`/deals/new?reservationId=${reservationId}`, { error: e2.message });
+        throw e2;
+      }
+      back("/reservations", { msg: `${e.message} Sent for approval; you can finish the sale once it's approved.` });
+    }
     if (e instanceof RuleError) back(`/deals/new?reservationId=${reservationId}`, { error: e.message });
     throw e;
   }

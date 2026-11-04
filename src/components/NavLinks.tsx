@@ -20,6 +20,7 @@ export const NAV_ITEMS: Item[] = [
   { href: "/commissions", label: "Commissions", icon: "%", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
   { href: "/clients", label: "Clients & files", icon: "▤", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
   { href: "/targets", label: "Targets", icon: "◎", roles: ["OWNER", "MANAGER"] },
+  { href: "/approvals", label: "Price approvals", icon: "✓", roles: ["OWNER", "MANAGER"] },
   { href: "/settings", label: "Settings", icon: "⚙", roles: ["OWNER", "ADMIN"] },
   { href: "/audit", label: "History", icon: "↺", roles: ["OWNER", "MANAGER", "ADMIN"] },
 ];
