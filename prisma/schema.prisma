@@ -11,7 +11,13 @@ enum Role {
   OWNER
   MANAGER
   AGENT
-  FINANCE
+  ACCOUNTANT
+  ADMIN
+}
+
+enum PayoutStatus {
+  APPROVED
+  PAID
 }
 
 enum CalendarPref {
@@ -97,6 +103,9 @@ model Company {
   reservationDays Int          @default(7)
   followUpDays    Int          @default(2)
   calendar        CalendarPref @default(ETHIOPIAN)
+  locale          String       @default("en")
+  staleLeadDays   Int          @default(3)
+  receiptSeq      Int          @default(0)
   createdAt       DateTime     @default(now())
 
   users        User[]
@@ -112,6 +121,7 @@ model Company {
   auditLogs    AuditLog[]
   followUps    FollowUp[]
   activities   Activity[]
+  targets      SalesTarget[]
 }
 
 model User {
@@ -123,6 +133,7 @@ model User {
   phone        String?
   passwordHash String
   role         Role     @default(AGENT)
+  external     Boolean  @default(false)
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
 
@@ -136,6 +147,8 @@ model User {
   documents         Document[]
   payouts           CommissionPayout[] @relation("PayoutAgent")
   payoutsMade       CommissionPayout[] @relation("PayoutPaidBy")
+  payoutsApproved   CommissionPayout[] @relation("PayoutApprovedBy")
+  targets           SalesTarget[]
   auditLogs         AuditLog[]
 
   @@index([companyId])
@@ -337,29 +350,49 @@ model Payment {
   confirmedBy   User?         @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id])
   confirmedAt   DateTime?
   rejectReason  String?
+  receiptNo     Int?
   receiptId     String?       @unique
   receipt       Document?     @relation(fields: [receiptId], references: [id])
   createdAt     DateTime      @default(now())
 
+  @@unique([companyId, receiptNo])
   @@index([companyId, status])
   @@index([dealId])
 }
 
 model CommissionPayout {
+  id           String       @id @default(cuid())
+  companyId    String
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  agentId      String
+  agent        User         @relation("PayoutAgent", fields: [agentId], references: [id])
+  dealId       String
+  deal         Deal         @relation(fields: [dealId], references: [id])
+  amount       Decimal      @db.Decimal(14, 2)
+  status       PayoutStatus @default(APPROVED)
+  approvedById String
+  approvedBy   User         @relation("PayoutApprovedBy", fields: [approvedById], references: [id])
+  approvedAt   DateTime     @default(now())
+  reference    String?
+  paidById     String?
+  paidBy       User?        @relation("PayoutPaidBy", fields: [paidById], references: [id])
+  paidAt       DateTime?
+
+  @@index([companyId, agentId])
+}
+
+/// Monthly sales target per agent (month = first day of the month, Addis time).
+model SalesTarget {
   id        String   @id @default(cuid())
   companyId String
   company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  agentId   String
-  agent     User     @relation("PayoutAgent", fields: [agentId], references: [id])
-  dealId    String
-  deal      Deal     @relation(fields: [dealId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  month     String
   amount    Decimal  @db.Decimal(14, 2)
-  reference String?
-  paidById  String
-  paidBy    User     @relation("PayoutPaidBy", fields: [paidById], references: [id])
-  paidAt    DateTime @default(now())
 
-  @@index([companyId, agentId])
+  @@unique([userId, month])
+  @@index([companyId, month])
 }
 
 model Document {

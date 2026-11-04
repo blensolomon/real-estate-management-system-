@@ -1,0 +1,38 @@
+/**
+ * Amharic translations, keyed by the English text used in the UI.
+ * Missing phrases fall back to English. Have a native speaker review before release.
+ */
+export const am: Record<string, string> = {
+  Home: "መነሻ",
+  Leads: "ደንበኛ ፍለጋ",
+  "Follow-ups": "ክትትል",
+  Units: "ቤቶች",
+  Reservations: "ቦታ ማስያዣ",
+  Sales: "ሽያጭ",
+  Payments: "ክፍያዎች",
+  "Who owes us money": "ያልተከፈለ ዕዳ",
+  Commissions: "ኮሚሽን",
+  "Clients & files": "ደንበኞችና ሰነዶች",
+  Targets: "ግቦች",
+  Settings: "ቅንብሮች",
+  History: "ታሪክ",
+  More: "ተጨማሪ",
+  "Sign out": "ውጣ",
+  Search: "ፈልግ",
+  Filter: "አጣራ",
+  Save: "አስቀምጥ",
+  Cancel: "ሰርዝ",
+  Call: "ደውል",
+  "Mark done": "ተጠናቋል",
+  "Needs attention": "ትኩረት የሚሹ",
+  "Sold this month": "በዚህ ወር የተሸጠ",
+  "Collected this month": "በዚህ ወር የተሰበሰበ",
+  "Late payments": "የዘገዩ ክፍያዎች",
+  "Units available": "ያሉ ቤቶች",
+  "Waiting for confirmation": "ማረጋገጫ የሚጠብቁ",
+  Owner: "ባለቤት",
+  "Sales Manager": "የሽያጭ ሥራ አስኪያጅ",
+  "Agent / Broker": "ወኪል / ደላላ",
+  Accountant: "ሂሳብ ሹም",
+  Admin: "አስተዳዳሪ",
+};

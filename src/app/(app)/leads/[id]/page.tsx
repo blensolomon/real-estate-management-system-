@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canManage, seesAll } from "@/lib/permissions";
+import { canManage, seesAll, SALES } from "@/lib/permissions";
 import { fmtDate, fmtDateTime, label, money, toDateInput, addDays } from "@/lib/format";
 import { ACTIVITY_TYPES, LEAD_STATUSES } from "@/lib/options";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
@@ -17,7 +17,7 @@ export default async function LeadPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ msg?: string; error?: string }>;
 }) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const { id } = await params;
   const sp = await searchParams;
   const lead = await db.lead.findFirst({

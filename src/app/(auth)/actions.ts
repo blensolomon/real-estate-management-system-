@@ -18,6 +18,7 @@ export async function login(fd: FormData) {
     name: user.name,
     companyName: user.company.name,
     calendar: user.company.calendar,
+    locale: user.company.locale,
   });
   redirect("/dashboard");
 }
@@ -38,7 +39,7 @@ export async function register(fd: FormData) {
     include: { users: true },
   });
   const u = c.users[0];
-  await createSession({ userId: u.id, companyId: c.id, role: u.role, name: u.name, companyName: c.name, calendar: c.calendar });
+  await createSession({ userId: u.id, companyId: c.id, role: u.role, name: u.name, companyName: c.name, calendar: c.calendar, locale: c.locale });
   redirect("/dashboard");
 }
 

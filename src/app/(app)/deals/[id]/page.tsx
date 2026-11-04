@@ -9,7 +9,7 @@ import { DOCUMENT_TYPES, PAYMENT_METHODS } from "@/lib/options";
 import { Badge, Empty, Flash, PageHeader, Stat } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { DateField } from "@/components/DateField";
-import { cancelDeal, payCommission, recordPayment, reviewPayment, uploadDealDocument } from "../actions";
+import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reviewPayment, uploadDealDocument } from "../actions";
 
 export default async function DealPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; error?: string }> }) {
   const s = await requireSession();
@@ -24,7 +24,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       installments: true,
       payments: { include: { recordedBy: true, confirmedBy: true, receipt: true }, orderBy: { paidAt: "desc" } },
       documents: { include: { uploadedBy: true }, orderBy: { createdAt: "desc" } },
-      payouts: { include: { paidBy: true }, orderBy: { paidAt: "desc" } },
+      payouts: { include: { approvedBy: true }, orderBy: { approvedAt: "asc" } },
     },
   });
   if (!deal || (!seesAll(s.role) && deal.agentId !== s.userId)) notFound();
@@ -122,16 +122,28 @@ export default async function DealPage({ params, searchParams }: { params: Promi
             <div className="flex justify-between"><span className="text-slate-500">Rate</span><span>{Number(deal.commissionRate)}%</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Total earned</span><span>{money(c.total)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Unlocked by collections</span><span>{money(c.accrued)}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Approved, not yet paid</span><span>{money(c.approved)}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">Paid to agent</span><span>{money(c.paid)}</span></div>
             <div className="flex justify-between font-semibold"><span>Payable now</span><span className="text-emerald-700">{money(c.payable)}</span></div>
             <div className="flex justify-between text-xs"><span className="text-slate-500">Locked until buyer pays</span><span>{money(c.locked)}</span></div>
-            {deal.payouts.map((p) => <div key={p.id} className="text-xs text-slate-500">Paid {money(p.amount)} on {fmtDate(p.paidAt, s.calendar)} by {p.paidBy.name} {p.reference ? `(${p.reference})` : ""}</div>)}
+            {deal.payouts.map((p) => (
+              <div key={p.id} className="flex flex-wrap items-center justify-between gap-1 text-xs text-slate-500">
+                <span>{p.status === "PAID" ? `Paid ${money(p.amount)} on ${fmtDate(p.paidAt, s.calendar)}${p.reference ? ` (${p.reference})` : ""}` : `Approved ${money(p.amount)} on ${fmtDate(p.approvedAt, s.calendar)} by ${p.approvedBy.name}`}</span>
+                {finance && p.status === "APPROVED" && (
+                  <form action={markCommissionPaid} className="flex gap-1">
+                    <input type="hidden" name="payoutId" value={p.id} />
+                    <input type="hidden" name="returnTo" value={`/deals/${deal.id}`} />
+                    <input name="reference" placeholder="Ref" className="input w-24 py-1" />
+                    <SubmitButton className="btn btn-sm">Mark paid</SubmitButton>
+                  </form>
+                )}
+              </div>
+            ))}
             {finance && c.payable > 0 && (
-              <form action={payCommission} className="flex gap-1 pt-2">
+              <form action={approveCommission} className="flex gap-1 pt-2">
                 <input type="hidden" name="dealId" value={deal.id} />
                 <input name="amount" defaultValue={c.payable} className="input py-1" />
-                <input name="reference" placeholder="Ref" className="input w-24 py-1" />
-                <SubmitButton className="btn btn-sm">Pay</SubmitButton>
+                <SubmitButton className="btn btn-sm">Approve</SubmitButton>
               </form>
             )}
           </div>

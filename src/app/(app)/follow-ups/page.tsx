@@ -2,14 +2,14 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { seesAll } from "@/lib/permissions";
+import { seesAll, SALES } from "@/lib/permissions";
 import { fmtDate, daysBetween } from "@/lib/format";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { completeFollowUp } from "../leads/actions";
 
 export default async function FollowUpsPage({ searchParams }: { searchParams: Promise<{ agent?: string; msg?: string; error?: string }> }) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const sp = await searchParams;
   const where: Prisma.FollowUpWhereInput = { companyId: s.companyId, doneAt: null };
   if (!seesAll(s.role)) where.assigneeId = s.userId;

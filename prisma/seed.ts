@@ -10,11 +10,11 @@ async function main() {
   await db.company.deleteMany({ where: { name: "Addis Homes Real Estate" } });
   const hash = await bcrypt.hash("password123", 10);
   const company = await db.company.create({ data: { name: "Addis Homes Real Estate", reservationDays: 7, followUpDays: 2 } });
-  const mk = (name: string, email: string, role: "OWNER" | "MANAGER" | "AGENT" | "FINANCE") =>
+  const mk = (name: string, email: string, role: "OWNER" | "MANAGER" | "AGENT" | "ACCOUNTANT") =>
     db.user.create({ data: { companyId: company.id, name, email, role, passwordHash: hash } });
   const owner = await mk("Abebe Kebede", "owner@demo.et", "OWNER");
   await mk("Sara Tesfaye", "manager@demo.et", "MANAGER");
-  const finance = await mk("Hanna Girma", "finance@demo.et", "FINANCE");
+  const finance = await mk("Hanna Girma", "accountant@demo.et", "ACCOUNTANT");
   const agents = [await mk("Dawit Alemu", "agent@demo.et", "AGENT"), await mk("Meron Haile", "agent2@demo.et", "AGENT"), await mk("Yonas Bekele", "agent3@demo.et", "AGENT")];
 
   const projects = [

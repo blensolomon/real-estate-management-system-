@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { ADMINS } from "@/lib/permissions";
 import { ROLES } from "@/lib/options";
 import { label } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
@@ -7,7 +8,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { addUser, updateCompany, updateUser } from "./actions";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string }> }) {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(ADMINS);
   const sp = await searchParams;
   const [company, users] = await Promise.all([
     db.company.findUniqueOrThrow({ where: { id: s.companyId } }),

@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canManage, seesAll } from "@/lib/permissions";
+import { canManage, seesAll, SALES } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { money } from "@/lib/format";
 import { Flash, PageHeader } from "@/components/ui";
@@ -8,7 +8,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { createReservation } from "../actions";
 
 export default async function NewReservationPage({ searchParams }: { searchParams: Promise<{ unitId?: string; leadId?: string; error?: string }> }) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const sp = await searchParams;
   await expireReservations(s.companyId);
   const [company, units, leads] = await Promise.all([

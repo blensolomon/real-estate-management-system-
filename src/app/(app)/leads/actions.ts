@@ -7,7 +7,7 @@ import { db } from "@/lib/db";
 import { requireSession, type Session } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { back, num, str } from "@/lib/actions-util";
-import { canManage, seesAll } from "@/lib/permissions";
+import { canManage, seesAll, SALES, MANAGERS } from "@/lib/permissions";
 import { addDays, parseDateInput } from "@/lib/format";
 
 async function loadLead(s: Session, id: string) {
@@ -17,7 +17,7 @@ async function loadLead(s: Session, id: string) {
 }
 
 export async function createLead(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const phone = str(fd, "phone").replace(/\s+/g, "");
   const name = str(fd, "name");
   if (!name || !phone) back("/leads/new", { error: "Name and phone are required" });
@@ -59,7 +59,7 @@ export async function createLead(fd: FormData) {
 }
 
 export async function logActivity(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const lead = await loadLead(s, str(fd, "leadId"));
   const type = str(fd, "type") as ActivityType;
   const note = str(fd, "note");
@@ -91,7 +91,7 @@ export async function logActivity(fd: FormData) {
 }
 
 export async function changeStatus(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const lead = await loadLead(s, str(fd, "leadId"));
   const status = str(fd, "status") as LeadStatus;
   if (status === lead.status) back(`/leads/${lead.id}`, {});
@@ -111,7 +111,7 @@ export async function changeStatus(fd: FormData) {
 }
 
 export async function reassignLead(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(MANAGERS);
   const lead = await loadLead(s, str(fd, "leadId"));
   const to = await db.user.findFirst({ where: { id: str(fd, "ownerId"), companyId: s.companyId, active: true } });
   if (!to) back(`/leads/${lead.id}`, { error: "Choose an active user" });
@@ -127,7 +127,7 @@ export async function reassignLead(fd: FormData) {
 }
 
 export async function scheduleFollowUp(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const lead = await loadLead(s, str(fd, "leadId"));
   const dueAt = parseDateInput(str(fd, "dueAt"));
   if (!dueAt) back(`/leads/${lead.id}`, { error: "Pick a date" });
@@ -138,7 +138,7 @@ export async function scheduleFollowUp(fd: FormData) {
 }
 
 export async function completeFollowUp(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const fu = await db.followUp.findFirst({ where: { id: str(fd, "id"), companyId: s.companyId, doneAt: null } });
   const returnTo = str(fd, "returnTo") || "/follow-ups";
   if (!fu || (!seesAll(s.role) && fu.assigneeId !== s.userId)) back(returnTo, { error: "Follow-up not found" });

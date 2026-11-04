@@ -6,13 +6,13 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
-import { canConfirmPayments, seesAll } from "@/lib/permissions";
+import { canConfirmPayments, seesAll, SALES, ACCOUNTS } from "@/lib/permissions";
 import { parseDateInput } from "@/lib/format";
 import { buildSchedule, commissionState, sum } from "@/lib/finance";
 import { saveDocument, validFile } from "@/lib/documents";
 
 export async function createDeal(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const reservationId = str(fd, "reservationId");
   const retry = `/deals/new?reservationId=${reservationId}`;
   const r = await db.reservation.findFirst({
@@ -112,19 +112,23 @@ export async function recordPayment(fd: FormData) {
 }
 
 export async function reviewPayment(fd: FormData) {
-  const s = await requireSession(["OWNER", "FINANCE"]);
+  const s = await requireSession(ACCOUNTS);
   const returnTo = str(fd, "returnTo") || "/payments";
   const p = await db.payment.findFirst({ where: { id: str(fd, "paymentId"), companyId: s.companyId, status: "PENDING" }, include: { deal: true } });
   if (!p) back(returnTo, { error: "Pending payment not found" });
   if (!canConfirmPayments(s.role)) back(returnTo, { error: "Not allowed" });
   const decision = str(fd, "decision");
   if (decision === "confirm") {
-    await db.payment.update({ where: { id: p.id }, data: { status: "CONFIRMED", confirmedById: s.userId, confirmedAt: new Date() } });
+    const receiptNo = await db.$transaction(async (tx) => {
+      const c = await tx.company.update({ where: { id: s.companyId }, data: { receiptSeq: { increment: 1 } } });
+      await tx.payment.update({ where: { id: p.id }, data: { status: "CONFIRMED", confirmedById: s.userId, confirmedAt: new Date(), receiptNo: c.receiptSeq } });
+      return c.receiptSeq;
+    });
     const all = await db.payment.findMany({ where: { dealId: p.dealId, status: "CONFIRMED" } });
     if (sum(all.map((x) => Number(x.amount))) >= Number(p.deal.price) && p.deal.status === "ACTIVE")
       await db.deal.update({ where: { id: p.dealId }, data: { status: "COMPLETED" } });
     await audit(s, "payment.confirmed", "Payment", p.id, `${p.deal.contractNo} ${p.amount}`);
-    back(returnTo, { msg: "Payment confirmed" });
+    back(returnTo, { msg: `Payment confirmed. Receipt no. ${receiptNo} issued.` });
   }
   const reason = str(fd, "reason");
   if (!reason) back(returnTo, { error: "Give a reason for rejecting" });
@@ -147,8 +151,8 @@ export async function uploadDealDocument(fd: FormData) {
   back(path, { msg: "Document uploaded" });
 }
 
-export async function payCommission(fd: FormData) {
-  const { s, deal } = await loadDeal(str(fd, "dealId"), ["OWNER", "FINANCE"]);
+export async function approveCommission(fd: FormData) {
+  const { s, deal } = await loadDeal(str(fd, "dealId"), ACCOUNTS);
   const returnTo = str(fd, "returnTo") || `/deals/${deal.id}`;
   const amount = num(fd, "amount");
   const [payments, payouts] = await Promise.all([
@@ -158,10 +162,20 @@ export async function payCommission(fd: FormData) {
   const c = commissionState(deal, sum(payments.map((p) => Number(p.amount))), payouts);
   if (!(amount > 0) || amount > c.payable + 0.001) back(returnTo, { error: `Amount must be between 0 and the payable ${c.payable}` });
   await db.commissionPayout.create({
-    data: { companyId: s.companyId, agentId: deal.agentId, dealId: deal.id, amount, reference: str(fd, "reference") || null, paidById: s.userId },
+    data: { companyId: s.companyId, agentId: deal.agentId, dealId: deal.id, amount, approvedById: s.userId },
   });
-  await audit(s, "commission.paid", "Deal", deal.id, `${amount}`);
-  back(returnTo, { msg: "Commission payout recorded" });
+  await audit(s, "commission.approved", "Deal", deal.id, `${amount}`);
+  back(returnTo, { msg: "Commission approved. Mark it paid once the money is sent." });
+}
+
+export async function markCommissionPaid(fd: FormData) {
+  const s = await requireSession(ACCOUNTS);
+  const returnTo = str(fd, "returnTo") || "/commissions";
+  const p = await db.commissionPayout.findFirst({ where: { id: str(fd, "payoutId"), companyId: s.companyId, status: "APPROVED" } });
+  if (!p) back(returnTo, { error: "Approved commission not found" });
+  await db.commissionPayout.update({ where: { id: p.id }, data: { status: "PAID", paidById: s.userId, paidAt: new Date(), reference: str(fd, "reference") || null } });
+  await audit(s, "commission.paid", "CommissionPayout", p.id, `${p.amount}`);
+  back(returnTo, { msg: "Commission marked as paid" });
 }
 
 export async function cancelDeal(fd: FormData) {

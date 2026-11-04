@@ -3,11 +3,12 @@
 import type { UnitStatus } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { ADMINS } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
 
 export async function createProject(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(ADMINS);
   const name = str(fd, "name");
   const rate = num(fd, "commissionRate");
   if (!name || !Number.isFinite(rate) || rate < 0 || rate > 100) back("/inventory", { error: "Name and a valid commission % are required" });
@@ -19,7 +20,7 @@ export async function createProject(fd: FormData) {
 }
 
 export async function updateProject(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(ADMINS);
   const id = str(fd, "projectId");
   const rate = num(fd, "commissionRate");
   if (!Number.isFinite(rate) || rate < 0 || rate > 100) back(`/inventory/${id}`, { error: "Invalid commission %" });
@@ -33,7 +34,7 @@ export async function updateProject(fd: FormData) {
 
 /** Adds one unit, or many when `count` > 1 (codes get a numeric suffix). */
 export async function addUnits(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(ADMINS);
   const projectId = str(fd, "projectId");
   const project = await db.project.findFirst({ where: { id: projectId, companyId: s.companyId } });
   if (!project) back("/inventory", { error: "Project not found" });
@@ -62,7 +63,7 @@ export async function addUnits(fd: FormData) {
 }
 
 export async function updateUnit(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(ADMINS);
   const unit = await db.unit.findFirst({ where: { id: str(fd, "unitId"), companyId: s.companyId } });
   if (!unit) back("/inventory", { error: "Unit not found" });
   const price = num(fd, "price");

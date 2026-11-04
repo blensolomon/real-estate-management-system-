@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canManage } from "@/lib/permissions";
+import { canAdmin } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { fmtDate, money } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
@@ -41,7 +41,7 @@ export default async function ProjectPage({
     },
   });
   if (!project) notFound();
-  const manage = canManage(s.role);
+  const manage = canAdmin(s.role);
 
   return (
     <div>

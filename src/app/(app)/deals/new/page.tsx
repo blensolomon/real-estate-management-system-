@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { SALES } from "@/lib/permissions";
 import { fmtDate, money, toDateInput } from "@/lib/format";
 import { Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -8,7 +9,7 @@ import { createDeal } from "../actions";
 import { notFound } from "next/navigation";
 
 export default async function NewDealPage({ searchParams }: { searchParams: Promise<{ reservationId?: string; error?: string }> }) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const sp = await searchParams;
   const r = await db.reservation.findFirst({
     where: { id: sp.reservationId ?? "", companyId: s.companyId, status: "ACTIVE" },

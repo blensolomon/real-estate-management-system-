@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canManage } from "@/lib/permissions";
+import { canAdmin } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { money } from "@/lib/format";
 import { Empty, Flash, PageHeader } from "@/components/ui";
@@ -46,7 +46,7 @@ export default async function InventoryPage({ searchParams }: { searchParams: Pr
         })}
         {projects.length === 0 && <Empty>No projects yet.</Empty>}
       </div>
-      {canManage(s.role) && (
+      {canAdmin(s.role) && (
         <form action={createProject} className="card mt-6 grid max-w-3xl grid-cols-4 items-end gap-3">
           <div className="col-span-4"><h2 className="h2">New project</h2></div>
           <div><label className="lbl">Name</label><input name="name" className="input" required /></div>

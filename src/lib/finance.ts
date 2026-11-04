@@ -70,19 +70,21 @@ export function dealFinancials(
   };
 }
 
-export type CommissionState = { total: number; accrued: number; paid: number; payable: number; locked: number };
+/** paid = paid out to agent; approved = approved by accountant, awaiting payment. */
+export type CommissionState = { total: number; accrued: number; paid: number; approved: number; payable: number; locked: number };
 
 /** Commission is earned on signing but only becomes payable in proportion to confirmed collections. */
 export function commissionState(
   deal: { price: unknown; commissionRate: unknown; status: string },
   confirmed: number,
-  payouts: Pick<CommissionPayout, "amount">[],
+  payouts: (Pick<CommissionPayout, "amount"> & { status?: CommissionPayout["status"] })[],
 ): CommissionState {
   const price = Number(deal.price);
   const total = deal.status === "CANCELLED" ? 0 : round((price * Number(deal.commissionRate)) / 100);
   const accrued = price > 0 ? round(total * Math.min(1, confirmed / price)) : 0;
-  const paid = sum(payouts.map((p) => Number(p.amount)));
-  return { total, accrued, paid, payable: round(Math.max(0, accrued - paid)), locked: round(total - accrued) };
+  const paid = sum(payouts.filter((p) => (p.status ?? "PAID") === "PAID").map((p) => Number(p.amount)));
+  const approved = sum(payouts.filter((p) => p.status === "APPROVED").map((p) => Number(p.amount)));
+  return { total, accrued, paid, approved, payable: round(Math.max(0, accrued - paid - approved)), locked: round(total - accrued) };
 }
 
 /** Builds an installment schedule: down payment now, remainder split monthly. */

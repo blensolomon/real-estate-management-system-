@@ -11,6 +11,7 @@ export type Session = {
   name: string;
   companyName: string;
   calendar: CalendarPref;
+  locale?: string;
 };
 
 const COOKIE = "resms_session";

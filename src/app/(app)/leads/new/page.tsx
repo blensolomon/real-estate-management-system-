@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canManage } from "@/lib/permissions";
+import { canManage, SALES } from "@/lib/permissions";
 import { label } from "@/lib/format";
 import { LEAD_SOURCES } from "@/lib/options";
 import { Flash, PageHeader } from "@/components/ui";
@@ -8,7 +8,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { createLead } from "../actions";
 
 export default async function NewLeadPage({ searchParams }: { searchParams: Promise<{ error?: string }> }) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const { error } = await searchParams;
   const [projects, users] = await Promise.all([
     db.project.findMany({ where: { companyId: s.companyId }, orderBy: { name: "asc" } }),

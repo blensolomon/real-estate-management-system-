@@ -1,10 +1,11 @@
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { AUDITORS } from "@/lib/permissions";
 import { fmtDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
 
 export default async function AuditPage() {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(AUDITORS);
   const logs = await db.auditLog.findMany({ where: { companyId: s.companyId }, include: { user: true }, orderBy: { createdAt: "desc" }, take: 300 });
   return (
     <div>

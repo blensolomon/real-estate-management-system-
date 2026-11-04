@@ -2,7 +2,7 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { seesAll } from "@/lib/permissions";
+import { seesAll, SALES } from "@/lib/permissions";
 import { fmtDate, label } from "@/lib/format";
 import { LEAD_SOURCES, LEAD_STATUSES } from "@/lib/options";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
@@ -10,7 +10,7 @@ import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 type SP = { q?: string; status?: string; source?: string; owner?: string; msg?: string; error?: string };
 
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SP> }) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const sp = await searchParams;
   const where: Prisma.LeadWhereInput = { companyId: s.companyId };
   if (!seesAll(s.role)) where.ownerId = s.userId;

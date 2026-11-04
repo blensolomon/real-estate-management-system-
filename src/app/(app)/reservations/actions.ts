@@ -5,12 +5,12 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
-import { canManage, seesAll } from "@/lib/permissions";
+import { canManage, seesAll, SALES, MANAGERS } from "@/lib/permissions";
 import { addDays } from "@/lib/format";
 import { expireReservations } from "@/lib/reservations";
 
 export async function createReservation(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   await expireReservations(s.companyId);
   const unitId = str(fd, "unitId");
   const leadId = str(fd, "leadId");
@@ -67,7 +67,7 @@ export async function createReservation(fd: FormData) {
 }
 
 async function loadActive(fd: FormData) {
-  const s = await requireSession(["OWNER", "MANAGER", "AGENT"]);
+  const s = await requireSession(SALES);
   const r = await db.reservation.findFirst({
     where: { id: str(fd, "id"), companyId: s.companyId, status: "ACTIVE" },
     include: { unit: true },
@@ -96,7 +96,7 @@ export async function extendReservation(fd: FormData) {
 }
 
 export async function runExpiry() {
-  const s = await requireSession(["OWNER", "MANAGER"]);
+  const s = await requireSession(MANAGERS);
   const n = await expireReservations(s.companyId);
   back("/reservations", { msg: `${n} reservation(s) expired` });
 }
