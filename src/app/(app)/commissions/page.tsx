@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canConfirmPayments, seesAll } from "@/lib/permissions";
+import { canConfirmPayments, seesAll, FINANCE_VIEW } from "@/lib/permissions";
 import { fmtDate, money } from "@/lib/format";
 import { round } from "@/lib/finance";
 import { getT } from "@/i18n/server";
@@ -12,7 +12,7 @@ import { approveCommission, markCommissionPaid } from "../deals/actions";
 import { loadCommissions, type CommissionsSP as SP } from "@/lib/commissions";
 
 export default async function CommissionsPage({ searchParams }: { searchParams: Promise<SP> }) {
-  const s = await requireSession();
+  const s = await requireSession(FINANCE_VIEW);
   const sp = await searchParams;
   const t = await getT();
   const { agentFilter, rows } = await loadCommissions(s, sp);

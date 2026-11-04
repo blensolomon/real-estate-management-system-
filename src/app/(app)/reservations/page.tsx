@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { SALES } from "@/lib/permissions";
+import { ExportButtons } from "@/components/ExportButtons";
 import { canManage, seesAll } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { fmtDate, money } from "@/lib/format";
@@ -9,13 +11,14 @@ import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { cancelReservation, extendReservation } from "./actions";
 
-export default async function ReservationsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string }> }) {
-  const s = await requireSession();
+export default async function ReservationsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string; q?: string }> }) {
+  const s = await requireSession(SALES);
   const sp = await searchParams;
   await expireReservations(s.companyId);
   const status = sp.status ?? "ACTIVE";
   const where: Prisma.ReservationWhereInput = { companyId: s.companyId, ...(status !== "ALL" ? { status: status as never } : {}) };
   if (!seesAll(s.role)) where.agentId = s.userId;
+  if (sp.q) where.OR = [{ client: { fullName: { contains: sp.q, mode: "insensitive" } } }, { client: { phone: { contains: sp.q } } }, { unit: { code: { contains: sp.q, mode: "insensitive" } } }];
   const list = await db.reservation.findMany({
     where,
     include: { unit: { include: { project: true } }, client: true, agent: true, deal: true },
@@ -28,16 +31,16 @@ export default async function ReservationsPage({ searchParams }: { searchParams:
       <PageHeader
         title="Reservations"
         sub="Reservations hold a unit for a limited time, then expire automatically and the unit becomes available."
-        actions={<Link href="/reservations/new" className="btn">+ New reservation</Link>}
+        actions={<><ExportButtons report="reservations" /><Link href="/reservations/new" className="btn">+ New reservation</Link></>}
       />
       <Flash msg={sp.msg} error={sp.error} />
-      <div className="mb-4 flex gap-2">
-        {["ACTIVE", "CONVERTED", "EXPIRED", "CANCELLED", "ALL"].map((st) => (
-          <Link key={st} href={`/reservations?status=${st}`} className={status === st ? "btn btn-sm" : "btn-secondary btn-sm"}>{st}</Link>
-        ))}
-      </div>
+<form className="mb-4 flex flex-wrap gap-2 print:hidden">
+        <input name="q" defaultValue={sp.q} placeholder="Search buyer, phone or unit" className="input max-w-xs" />
+        <select name="status" defaultValue={status} className="input max-w-[12rem]"><option value="ACTIVE">Active</option><option value="CONVERTED">Became a sale</option><option value="EXPIRED">Expired</option><option value="CANCELLED">Cancelled</option><option value="ALL">All</option></select>
+        <button className="btn-secondary">Filter</button>
+      </form>
       <div className="card overflow-x-auto p-0">
-        {list.length === 0 ? <div className="p-5"><Empty>No reservations.</Empty></div> : (
+        {list.length === 0 ? <div className="p-5"><Empty>No reservations here. Reserve an available unit to hold it for a buyer.</Empty></div> : (
           <table className="tbl">
             <thead><tr><th>Unit</th><th>Buyer</th><th>Agent</th><th>Deposit</th><th>Expires</th><th>Status</th><th></th></tr></thead>
             <tbody>

@@ -1,6 +1,7 @@
 import { PrismaClient, type LeadSource } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { buildSchedule } from "../src/lib/finance";
+import { monthOf } from "../src/lib/months";
 
 const db = new PrismaClient();
 const day = 86400000;
@@ -10,12 +11,14 @@ async function main() {
   await db.company.deleteMany({ where: { name: "Addis Homes Real Estate" } });
   const hash = await bcrypt.hash("password123", 10);
   const company = await db.company.create({ data: { name: "Addis Homes Real Estate", reservationDays: 7, followUpDays: 2 } });
-  const mk = (name: string, email: string, role: "OWNER" | "MANAGER" | "AGENT" | "ACCOUNTANT") =>
-    db.user.create({ data: { companyId: company.id, name, email, role, passwordHash: hash } });
+  const mk = (name: string, email: string, role: "OWNER" | "MANAGER" | "AGENT" | "ACCOUNTANT" | "ADMIN", external = false) =>
+    db.user.create({ data: { companyId: company.id, name, email, role, external, passwordHash: hash } });
   const owner = await mk("Abebe Kebede", "owner@demo.et", "OWNER");
   await mk("Sara Tesfaye", "manager@demo.et", "MANAGER");
   const finance = await mk("Hanna Girma", "accountant@demo.et", "ACCOUNTANT");
-  const agents = [await mk("Dawit Alemu", "agent@demo.et", "AGENT"), await mk("Meron Haile", "agent2@demo.et", "AGENT"), await mk("Yonas Bekele", "agent3@demo.et", "AGENT")];
+  await mk("Kebede Admasu", "admin@demo.et", "ADMIN");
+  const agents = [await mk("Dawit Alemu", "agent@demo.et", "AGENT"), await mk("Meron Haile", "agent2@demo.et", "AGENT"), await mk("Yonas Bekele (broker)", "broker@demo.et", "AGENT", true)];
+  let receiptNo = 0;
 
   const projects = [
     await db.project.create({ data: { companyId: company.id, name: "Bole Heights", location: "Bole, Addis Ababa", commissionRate: 2 } }),
@@ -72,7 +75,7 @@ async function main() {
       data: { companyId: company.id, contractNo: `C-${String(i + 1).padStart(4, "0")}`, unitId: unit.id, clientId: client.id, agentId: lead.ownerId!, reservationId: res.id, price, commissionRate: projects.find((p) => p.id === unit.projectId)!.commissionRate, signedAt: ago(plan.start), installments: { create: schedule } },
     });
     for (const inst of schedule.slice(0, plan.paidInst)) {
-      await db.payment.create({ data: { companyId: company.id, dealId: deal.id, amount: inst.amount, paidAt: inst.dueDate, method: inst.seq === 1 ? "BANK_TRANSFER" : "TELEBIRR", reference: `FT${deal.contractNo.slice(2)}${inst.seq}`, status: "CONFIRMED", recordedById: lead.ownerId!, confirmedById: finance.id, confirmedAt: inst.dueDate } });
+      await db.payment.create({ data: { companyId: company.id, dealId: deal.id, amount: inst.amount, paidAt: inst.dueDate, method: inst.seq === 1 ? "BANK_TRANSFER" : "TELEBIRR", reference: `FT${deal.contractNo.slice(2)}${inst.seq}`, status: "CONFIRMED", recordedById: lead.ownerId!, confirmedById: finance.id, confirmedAt: inst.dueDate, receiptNo: ++receiptNo } });
     }
     if (i === 4) await db.payment.create({ data: { companyId: company.id, dealId: deal.id, amount: schedule[2].amount, paidAt: ago(2), method: "CBE_BIRR", reference: "CBE778812", recordedById: lead.ownerId!, status: "PENDING" } });
     if (i === 5) await db.payment.create({ data: { companyId: company.id, dealId: deal.id, amount: schedule[0].amount, paidAt: ago(1), method: "BANK_TRANSFER", reference: "FT2611ABX", recordedById: lead.ownerId!, status: "PENDING" } });
@@ -88,6 +91,9 @@ async function main() {
   }
   await db.unit.update({ where: { id: units[19].id }, data: { status: "BLOCKED" } });
   await db.auditLog.create({ data: { companyId: company.id, userId: owner.id, action: "seed", entity: "Company", entityId: company.id, detail: "Demo data loaded" } });
+  await db.company.update({ where: { id: company.id }, data: { receiptSeq: receiptNo } });
+  const month = monthOf(new Date(), company.calendar).key;
+  for (const [i, a] of agents.entries()) await db.salesTarget.create({ data: { companyId: company.id, userId: a.id, month, amount: [12_000_000, 8_000_000, 5_000_000][i] } });
   console.log("Seeded. Log in as owner@demo.et / password123");
 }
 

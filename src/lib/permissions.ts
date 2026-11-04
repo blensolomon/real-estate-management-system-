@@ -5,6 +5,7 @@ export const SALES: Role[] = ["OWNER", "MANAGER", "AGENT"];
 export const MANAGERS: Role[] = ["OWNER", "MANAGER"];
 export const ADMINS: Role[] = ["OWNER", "ADMIN"];
 export const ACCOUNTS: Role[] = ["OWNER", "ACCOUNTANT"];
+export const FINANCE_VIEW: Role[] = ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"];
 export const AUDITORS: Role[] = ["OWNER", "MANAGER", "ADMIN"];
 export const ALL_ROLES: Role[] = ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT", "ADMIN"];
 

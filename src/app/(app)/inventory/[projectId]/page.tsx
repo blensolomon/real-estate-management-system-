@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { ExportButtons } from "@/components/ExportButtons";
 import { canAdmin } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { fmtDate, money } from "@/lib/format";
@@ -21,7 +22,7 @@ export default async function ProjectPage({
   searchParams,
 }: {
   params: Promise<{ projectId: string }>;
-  searchParams: Promise<{ msg?: string; error?: string; status?: string }>;
+  searchParams: Promise<{ msg?: string; error?: string; status?: string; q?: string }>;
 }) {
   const s = await requireSession();
   const { projectId } = await params;
@@ -31,7 +32,7 @@ export default async function ProjectPage({
     where: { id: projectId, companyId: s.companyId },
     include: {
       units: {
-        where: sp.status ? { status: sp.status as never } : {},
+        where: { ...(sp.status ? { status: sp.status as never } : {}), ...(sp.q ? { OR: [{ code: { contains: sp.q, mode: "insensitive" } }, { type: { contains: sp.q, mode: "insensitive" } }, { block: { contains: sp.q, mode: "insensitive" } }] } : {}) },
         orderBy: [{ block: "asc" }, { floor: "asc" }, { code: "asc" }],
         include: {
           reservations: { where: { status: "ACTIVE" }, include: { client: true, agent: true } },
@@ -45,13 +46,14 @@ export default async function ProjectPage({
 
   return (
     <div>
-      <PageHeader title={project.name} sub={`${project.location ?? ""} · commission ${Number(project.commissionRate)}%`} actions={<Link href="/inventory" className="btn-secondary">All projects</Link>} />
+      <PageHeader title={project.name} sub={`${project.location ?? ""} · commission ${Number(project.commissionRate)}%`} actions={<><ExportButtons report="units" /><Link href="/inventory" className="btn-secondary">All projects</Link></>} />
       <Flash msg={sp.msg} error={sp.error} />
-      <div className="mb-4 flex gap-2 text-sm">
-        {["", "AVAILABLE", "RESERVED", "SOLD", "BLOCKED"].map((st) => (
-          <Link key={st} href={`/inventory/${project.id}${st ? `?status=${st}` : ""}`} className={(sp.status ?? "") === st ? "btn btn-sm" : "btn-secondary btn-sm"}>{st || "All"}</Link>
-        ))}
-      </div>
+<form className="mb-4 flex flex-wrap gap-2 print:hidden">
+        <input name="q" defaultValue={sp.q} placeholder="Search unit code, type or block" className="input max-w-xs" />
+        <select name="status" defaultValue={sp.status ?? ""} className="input max-w-[12rem]"><option value="">All</option><option value="AVAILABLE">Available</option><option value="RESERVED">Reserved</option><option value="SOLD">Sold</option><option value="BLOCKED">Not for sale</option></select>
+        <button className="btn-secondary">Filter</button>
+      </form>
+      <p className="muted mb-3"><span className="text-emerald-700">Green = available</span> · <span className="text-amber-700">amber = reserved</span> · <span className="text-sky-700">blue = sold</span></p>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
         {project.units.map((u) => {
           const r = u.reservations[0];

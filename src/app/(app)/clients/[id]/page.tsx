@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { seesAll } from "@/lib/permissions";
+import { seesAll, FINANCE_VIEW } from "@/lib/permissions";
 import { fmtDate, label, money } from "@/lib/format";
 import { dealFinancials } from "@/lib/finance";
 import { DOCUMENT_TYPES } from "@/lib/options";
@@ -11,7 +11,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { updateClient, uploadClientDocument } from "../actions";
 
 export default async function ClientPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; error?: string }> }) {
-  const s = await requireSession();
+  const s = await requireSession(FINANCE_VIEW);
   const { id } = await params;
   const sp = await searchParams;
   const c = await db.client.findFirst({
@@ -24,7 +24,7 @@ export default async function ClientPage({ params, searchParams }: { params: Pro
     },
   });
   if (!c) notFound();
-  if (!seesAll(s.role) && !c.deals.some((d) => d.agentId === s.userId) && !c.reservations.some((r) => r.agentId === s.userId)) notFound();
+  if (!seesAll(s.role) && c.lead?.ownerId !== s.userId && !c.deals.some((d) => d.agentId === s.userId) && !c.reservations.some((r) => r.agentId === s.userId)) notFound();
   return (
     <div>
       <PageHeader title={c.fullName} sub={<>{c.phone}{c.idNumber ? ` · ID ${c.idNumber}` : ""}{c.lead && <> · from lead <Link className="link" href={`/leads/${c.lead.id}`}>{c.lead.name}</Link></>}</>} />

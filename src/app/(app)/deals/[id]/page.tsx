@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { canConfirmPayments, seesAll } from "@/lib/permissions";
+import { canConfirmPayments, seesAll, FINANCE_VIEW } from "@/lib/permissions";
 import { fmtDate, fmtDateTime, label, money, toDateInput } from "@/lib/format";
 import { commissionState, dealFinancials } from "@/lib/finance";
 import { DOCUMENT_TYPES, PAYMENT_METHODS } from "@/lib/options";
@@ -12,7 +12,7 @@ import { DateField } from "@/components/DateField";
 import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reviewPayment, uploadDealDocument } from "../actions";
 
 export default async function DealPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; error?: string }> }) {
-  const s = await requireSession();
+  const s = await requireSession(FINANCE_VIEW);
   const { id } = await params;
   const sp = await searchParams;
   const deal = await db.deal.findFirst({
@@ -80,7 +80,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                       <td>{label(p.method)}<div className="text-xs text-slate-500">{p.reference ?? "—"}</div></td>
                       <td>{p.receipt ? <a className="link" href={`/api/documents/${p.receipt.id}`} target="_blank">View</a> : <span className="text-xs text-amber-600">None</span>}</td>
                       <td>{p.recordedBy.name}<div className="text-xs text-slate-500">{fmtDateTime(p.createdAt, s.calendar)}</div></td>
-                      <td><Badge>{p.status}</Badge>{p.confirmedBy && <div className="text-xs text-slate-500">by {p.confirmedBy.name}</div>}{p.rejectReason && <div className="text-xs text-rose-600">{p.rejectReason}</div>}</td>
+                      <td><Badge>{p.status}</Badge>{p.confirmedBy && <div className="text-xs text-slate-500">by {p.confirmedBy.name}</div>}{p.receiptNo != null && <Link href={`/payments/${p.id}/receipt`} className="link text-xs">Receipt {p.receiptNo}</Link>}{p.rejectReason && <div className="text-xs text-rose-600">{p.rejectReason}</div>}</td>
                       <td>
                         {finance && p.status === "PENDING" && (
                           <div className="flex flex-col gap-1">

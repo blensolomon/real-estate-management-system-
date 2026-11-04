@@ -27,7 +27,15 @@ test("allocates confirmed payments oldest-first and ages the rest", () => {
 
 test("commission becomes payable proportionally to confirmed collections", () => {
   const c = commissionState({ price: 1_000_000, commissionRate: 2, status: "ACTIVE" }, 250_000, [{ amount: 2000 } as never]);
-  assert.deepEqual(c, { total: 20000, accrued: 5000, paid: 2000, payable: 3000, locked: 15000 });
+  assert.deepEqual(c, { total: 20000, accrued: 5000, paid: 2000, approved: 0, payable: 3000, locked: 15000 });
+});
+
+test("approved-but-unpaid commission is not payable again", () => {
+  const c = commissionState({ price: 1_000_000, commissionRate: 2, status: "ACTIVE" }, 250_000, [
+    { amount: 2000, status: "PAID" } as never,
+    { amount: 1000, status: "APPROVED" } as never,
+  ]);
+  assert.deepEqual(c, { total: 20000, accrued: 5000, paid: 2000, approved: 1000, payable: 2000, locked: 15000 });
 });
 
 test("schedule sums to price", () => {

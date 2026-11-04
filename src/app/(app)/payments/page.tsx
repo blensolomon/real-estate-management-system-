@@ -2,6 +2,8 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
+import { FINANCE_VIEW } from "@/lib/permissions";
+import { ExportButtons } from "@/components/ExportButtons";
 import { canConfirmPayments, seesAll } from "@/lib/permissions";
 import { fmtDate, fmtDateTime, label, money } from "@/lib/format";
 import { sum } from "@/lib/finance";
@@ -9,12 +11,13 @@ import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { reviewPayment } from "../deals/actions";
 
-export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string }> }) {
-  const s = await requireSession();
+export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string; q?: string }> }) {
+  const s = await requireSession(FINANCE_VIEW);
   const sp = await searchParams;
   const status = sp.status ?? "PENDING";
   const where: Prisma.PaymentWhereInput = { companyId: s.companyId, ...(status !== "ALL" ? { status: status as never } : {}) };
   if (!seesAll(s.role)) where.deal = { agentId: s.userId };
+  if (sp.q) where.OR = [{ reference: { contains: sp.q, mode: "insensitive" } }, { deal: { contractNo: { contains: sp.q, mode: "insensitive" } } }, { deal: { client: { fullName: { contains: sp.q, mode: "insensitive" } } } }, { deal: { client: { phone: { contains: sp.q } } } }];
   const payments = await db.payment.findMany({
     where,
     include: { deal: { include: { client: true, unit: true, agent: true } }, recordedBy: true, confirmedBy: true, receipt: true },
@@ -24,12 +27,14 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
   const finance = canConfirmPayments(s.role);
   return (
     <div>
-      <PageHeader title="Payments" sub="Only confirmed payments reduce a buyer's balance and unlock commission." />
+      <PageHeader title="Payments" sub="Payments recorded by agents wait here until the accountant checks the bank or Telebirr reference. Only confirmed payments count." actions={<ExportButtons report="payments" />} />
       <Flash msg={sp.msg} error={sp.error} />
-      <div className="mb-4 flex items-center gap-2">
-        {["PENDING", "CONFIRMED", "REJECTED", "ALL"].map((st) => (
-          <Link key={st} href={`/payments?status=${st}`} className={status === st ? "btn btn-sm" : "btn-secondary btn-sm"}>{st}</Link>
-        ))}
+<form className="mb-4 flex flex-wrap gap-2 print:hidden">
+        <input name="q" defaultValue={sp.q} placeholder="Search buyer, contract or reference" className="input max-w-xs" />
+        <select name="status" defaultValue={status} className="input max-w-[12rem]"><option value="PENDING">Waiting for confirmation</option><option value="CONFIRMED">Confirmed</option><option value="REJECTED">Rejected</option><option value="ALL">All</option></select>
+        <button className="btn-secondary">Filter</button>
+      </form>
+      <div className="mb-2 flex">
         <span className="muted ml-auto">{payments.length} payments · {money(sum(payments.map((p) => Number(p.amount))))}</span>
       </div>
       <div className="card overflow-x-auto p-0">
@@ -46,7 +51,7 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
                   <td>{label(p.method)}<div className="text-xs text-slate-500">{p.reference ?? "—"}</div></td>
                   <td>{p.receipt ? <a className="link" href={`/api/documents/${p.receipt.id}`} target="_blank">View</a> : <span className="text-xs text-amber-600">Missing</span>}</td>
                   <td>{p.recordedBy.name}<div className="text-xs text-slate-500">{fmtDateTime(p.createdAt, s.calendar)}</div></td>
-                  <td><Badge>{p.status}</Badge>{p.confirmedBy && <div className="text-xs text-slate-500">{p.confirmedBy.name}</div>}{p.rejectReason && <div className="text-xs text-rose-600">{p.rejectReason}</div>}</td>
+                  <td><Badge>{p.status}</Badge>{p.confirmedBy && <div className="text-xs text-slate-500">{p.confirmedBy.name}</div>}{p.receiptNo != null && <Link href={`/payments/${p.id}/receipt`} className="link text-xs">Receipt {p.receiptNo}</Link>}{p.rejectReason && <div className="text-xs text-rose-600">{p.rejectReason}</div>}</td>
                   {finance && status === "PENDING" && (
                     <td>
                       <div className="flex gap-1">

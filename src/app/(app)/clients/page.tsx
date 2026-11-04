@@ -2,15 +2,15 @@ import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { seesAll } from "@/lib/permissions";
+import { seesAll, FINANCE_VIEW } from "@/lib/permissions";
 import { fmtDate } from "@/lib/format";
 import { Empty, PageHeader } from "@/components/ui";
 
 export default async function ClientsPage({ searchParams }: { searchParams: Promise<{ q?: string }> }) {
-  const s = await requireSession();
+  const s = await requireSession(FINANCE_VIEW);
   const sp = await searchParams;
   const where: Prisma.ClientWhereInput = { companyId: s.companyId };
-  if (!seesAll(s.role)) where.OR = [{ deals: { some: { agentId: s.userId } } }, { reservations: { some: { agentId: s.userId } } }];
+  if (!seesAll(s.role)) where.OR = [{ deals: { some: { agentId: s.userId } } }, { reservations: { some: { agentId: s.userId } } }, { lead: { ownerId: s.userId } }];
   if (sp.q) where.AND = [{ OR: [{ fullName: { contains: sp.q, mode: "insensitive" } }, { phone: { contains: sp.q } }, { idNumber: { contains: sp.q } }] }];
   const clients = await db.client.findMany({
     where,
