@@ -31,7 +31,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
   const t = await getT();
   await expireReservations(s.companyId);
   const all = seesAll(s.role);
-  const sales = s.role !== "ACCOUNTANT" && s.role !== "ADMIN";
+  if (s.role === "ADMIN") return <AdminHome companyId={s.companyId} t={t} />;
+  const sales = s.role !== "ACCOUNTANT";
   const now = new Date();
   const month = monthOf(now, s.calendar);
   const months = lastMonths(6, s.calendar, now);
@@ -49,7 +50,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
           where: { companyId: s.companyId, status: { notIn: ["WON", "LOST"] }, ...(all ? {} : { ownerId: s.userId }), OR: [{ lastActivityAt: { lt: staleBefore } }, { lastActivityAt: null, createdAt: { lt: staleBefore } }] },
           include: { owner: true },
           orderBy: { lastActivityAt: { sort: "asc", nulls: "first" } },
-          take: 15,
+          take: 100,
         })
       : Promise.resolve([]),
     db.deal.findMany({ where: { companyId: s.companyId, signedAt: { gte: month.start, lt: month.end }, status: { not: "CANCELLED" }, ...mine } }),
@@ -96,7 +97,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </div>
         {attentionCount === 0 && <p className="px-4 py-6 text-center text-sm text-emerald-700">{t("All clear. Nothing needs you right now.")}</p>}
         <ul className="divide-y divide-slate-100">
-          {late.slice(0, 10).map(({ deal, f }) => (
+          {late.slice(0, 5).map(({ deal, f }) => (
             <li key={`d${deal.id}`} className="flex flex-wrap items-center gap-2 px-4 py-3">
               <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-600" aria-hidden />
               <div className="min-w-0 flex-1">
@@ -104,7 +105,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <div className="text-sm text-rose-700">{t("{amount} late by {days} days", { amount: money(f.overdueAmount), days: f.oldestOverdueDays })}</div>
                 <div className="text-xs text-slate-500">{deal.unit.project.name} {deal.unit.code} · {deal.agent.name}</div>
               </div>
-              <div className="flex flex-wrap gap-1">
+              <div className="flex w-full flex-wrap gap-1 pl-4 sm:w-auto sm:pl-0">
                 <Contact phone={deal.client.phone} t={t} />
                 <Link href={`/deals/${deal.id}#pay`} className="btn btn-sm">{t("Record payment")}</Link>
               </div>
@@ -120,7 +121,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   <div className="text-sm text-amber-700">{t("Reservation ends in {h} hours", { h: hours })}</div>
                   <div className="text-xs text-slate-500">{r.agent.name}</div>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex w-full flex-wrap gap-1 pl-4 sm:w-auto sm:pl-0">
                   <Contact phone={r.client.phone} t={t} />
                   {sales && <Link href={`/deals/new?reservationId=${r.id}`} className="btn btn-sm">{t("Make it a sale")}</Link>}
                   {canManage(s.role) && <Link href="/reservations" className="btn-secondary btn-sm">{t("Extend")}</Link>}
@@ -128,7 +129,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
               </li>
             );
           })}
-          {staleLeads.map((l) => {
+          {staleLeads.slice(0, 5).map((l) => {
             const last = l.lastActivityAt ?? l.createdAt;
             return (
               <li key={`l${l.id}`} className="flex flex-wrap items-center gap-2 px-4 py-3">
@@ -138,7 +139,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                   <div className="text-sm text-amber-700">{t("No contact for {d} days", { d: daysBetween(last, now) })}</div>
                   <div className="text-xs text-slate-500">{l.owner?.name ?? t("Unassigned")}</div>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex w-full flex-wrap gap-1 pl-4 sm:w-auto sm:pl-0">
                   <Contact phone={l.phone} t={t} />
                   <form action={markLeadContacted}>
                     <input type="hidden" name="leadId" value={l.id} />
@@ -149,7 +150,8 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
             );
           })}
         </ul>
-        {late.length > 10 && <Link href="/collections" className="block px-4 py-3 text-sm text-emerald-700">{t("See all {n} late buyers", { n: late.length })} →</Link>}
+        {staleLeads.length > 5 && <Link href="/follow-ups" className="block px-4 py-3 text-sm text-emerald-700">{t("See all quiet leads")} →</Link>}
+        {late.length > 5 && <Link href="/collections" className="block px-4 py-3 text-sm text-emerald-700">{t("See all {n} late buyers", { n: late.length })} →</Link>}
       </section>
 
       <div className="mt-6 grid gap-6 lg:grid-cols-2">
@@ -186,6 +188,26 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
         </section>
       </div>
       <p className="mt-4 text-xs text-slate-400">{t("Today")}: {fmtDate(now, s.calendar)}</p>
+    </div>
+  );
+}
+
+async function AdminHome({ companyId, t }: { companyId: string; t: (s: string, v?: Record<string, string | number>) => string }) {
+  const [users, projects, units] = await Promise.all([
+    db.user.groupBy({ by: ["active"], where: { companyId }, _count: true }),
+    db.project.count({ where: { companyId } }),
+    db.unit.groupBy({ by: ["status"], where: { companyId }, _count: true }),
+  ]);
+  const active = users.find((u) => u.active)?._count ?? 0;
+  const available = units.find((u) => u.status === "AVAILABLE")?._count ?? 0;
+  return (
+    <div>
+      <PageHeader title={t("Admin")} sub={t("Manage users, projects and company settings.")} />
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <Stat label={t("Active users")} value={active} href="/settings" tone="green" />
+        <Stat label={t("Projects")} value={projects} href="/inventory" />
+        <Stat label={t("Units available")} value={available} href="/inventory" tone="green" />
+      </div>
     </div>
   );
 }
