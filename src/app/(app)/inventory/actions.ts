@@ -54,6 +54,9 @@ export async function addUnits(fd: FormData) {
     type: str(fd, "type") || null,
     sizeSqm: size > 0 ? size : null,
     price,
+    kind: str(fd, "kind") === "PLOT" ? ("PLOT" as const) : ("APARTMENT" as const),
+    zoning: str(fd, "zoning") || null,
+    titleStatus: str(fd, "titleStatus") || null,
   }));
   const res = await db.unit.createMany({ data: rows, skipDuplicates: true });
   await audit(s, "units.added", "Project", projectId, `${res.count} units`);
@@ -70,18 +73,30 @@ export async function updateUnit(fd: FormData) {
   const status = str(fd, "status") as UnitStatus;
   const path = `/inventory/${unit.projectId}`;
   if (status !== unit.status) {
-    const allowed = (unit.status === "AVAILABLE" && status === "BLOCKED") || (unit.status === "BLOCKED" && status === "AVAILABLE");
-    if (!allowed) back(path, { error: "Reserved/sold status changes only through reservations and deals" });
+    const allowed =
+      (unit.status === "AVAILABLE" && status === "BLOCKED") ||
+      (unit.status === "BLOCKED" && status === "AVAILABLE") ||
+      (unit.status === "SOLD" && status === "HANDED_OVER");
+    if (!allowed) back(path, { error: "Reserved and sold changes happen through reservations and sales" });
   }
   try {
     await db.unit.update({
       where: { id: unit.id },
-      data: { price: price > 0 ? price : unit.price, status, code: str(fd, "code") || unit.code },
+      data: {
+        price: price > 0 ? price : unit.price,
+        status,
+        code: str(fd, "code") || unit.code,
+        ...(unit.kind === "PLOT" ? { zoning: str(fd, "zoning") || null, titleStatus: str(fd, "titleStatus") || null } : {}),
+      },
     });
   } catch (e) {
     if (isUniqueViolation(e)) back(path, { error: "Another unit already uses that code" });
     throw e;
   }
-  await audit(s, "unit.updated", "Unit", unit.id, `${unit.code}: price ${unit.price}→${price}, ${unit.status}→${status}`);
+  const newPrice = price > 0 ? price : Number(unit.price);
+  await audit(s, Number(unit.price) !== newPrice ? "unit.price_changed" : "unit.updated", "Unit", unit.id, `${unit.code}: price ${unit.price}→${newPrice}, ${unit.status}→${status}`, {
+    before: { price: Number(unit.price), status: unit.status, code: unit.code, zoning: unit.zoning, titleStatus: unit.titleStatus },
+    after: { price: newPrice, status, code: str(fd, "code") || unit.code, zoning: str(fd, "zoning") || null, titleStatus: str(fd, "titleStatus") || null },
+  });
   back(path, { msg: `Unit ${unit.code} updated` });
 }

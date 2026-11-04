@@ -3,7 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { ExportButtons } from "@/components/ExportButtons";
-import { canAdmin } from "@/lib/permissions";
+import { canAdmin, seesAll } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { fmtDate, money } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
@@ -14,6 +14,7 @@ const TILE: Record<string, string> = {
   AVAILABLE: "border-emerald-300 bg-emerald-50",
   RESERVED: "border-amber-300 bg-amber-50",
   SOLD: "border-sky-300 bg-sky-50",
+  HANDED_OVER: "border-indigo-300 bg-indigo-50",
   BLOCKED: "border-slate-300 bg-slate-100",
 };
 
@@ -50,10 +51,10 @@ export default async function ProjectPage({
       <Flash msg={sp.msg} error={sp.error} />
 <form className="mb-4 flex flex-wrap gap-2 print:hidden">
         <input name="q" defaultValue={sp.q} placeholder="Search unit code, type or block" className="input max-w-xs" />
-        <select name="status" defaultValue={sp.status ?? ""} className="input max-w-[12rem]"><option value="">All</option><option value="AVAILABLE">Available</option><option value="RESERVED">Reserved</option><option value="SOLD">Sold</option><option value="BLOCKED">Not for sale</option></select>
+        <select name="status" defaultValue={sp.status ?? ""} className="input max-w-[12rem]"><option value="">All</option><option value="AVAILABLE">Available</option><option value="RESERVED">Reserved</option><option value="SOLD">Sold</option><option value="HANDED_OVER">Handed over</option><option value="BLOCKED">Not for sale</option></select>
         <button className="btn-secondary">Filter</button>
       </form>
-      <p className="muted mb-3"><span className="text-emerald-700">Green = available</span> · <span className="text-amber-700">amber = reserved</span> · <span className="text-sky-700">blue = sold</span></p>
+      <p className="muted mb-3"><span className="text-emerald-700">Green = available</span> · <span className="text-amber-700">amber = reserved</span> · <span className="text-sky-700">blue = sold</span> · <span className="text-indigo-700">purple = handed over</span></p>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
         {project.units.map((u) => {
           const r = u.reservations[0];
@@ -61,15 +62,15 @@ export default async function ProjectPage({
           return (
             <div key={u.id} className={`rounded-lg border p-3 text-sm ${TILE[u.status]}`}>
               <div className="flex items-center justify-between">
-                <span className="font-semibold">{u.code}</span>
+                <Link href={`/units/${u.id}`} className="font-semibold underline-offset-2 hover:underline">{u.code}</Link>
                 <Badge>{u.status}</Badge>
               </div>
               <div className="mt-1 text-xs text-slate-600">
-                {[u.type, u.sizeSqm ? `${Number(u.sizeSqm)} m²` : null, u.floor != null ? `Floor ${u.floor}` : null, u.block ? `Block ${u.block}` : null].filter(Boolean).join(" · ")}
+                {[u.kind === "PLOT" ? "Plot" : null, u.type, u.sizeSqm ? `${Number(u.sizeSqm)} m²` : null, u.floor != null ? `Floor ${u.floor}` : null, u.block ? `Block ${u.block}` : null, u.zoning, u.titleStatus ? `Title: ${u.titleStatus}` : null].filter(Boolean).join(" · ")}
               </div>
               <div className="mt-1 font-medium">{money(u.price)}</div>
-              {r && <div className="mt-1 text-xs">For {r.client.fullName} ({r.agent.name}) until {fmtDate(r.expiresAt, s.calendar)}</div>}
-              {d && <div className="mt-1 text-xs">Sold: <Link className="link" href={`/deals/${d.id}`}>{d.contractNo}</Link> · {d.client.fullName}</div>}
+              {r && <div className="mt-1 text-xs">For {seesAll(s.role) || r.agentId === s.userId ? `${r.client.fullName} (${r.agent.name})` : r.agent.name} until {fmtDate(r.expiresAt, s.calendar)}</div>}
+              {d && (seesAll(s.role) || d.agentId === s.userId ? <div className="mt-1 text-xs">Sold: <Link className="link" href={`/deals/${d.id}`}>{d.contractNo}</Link> · {d.client.fullName}</div> : <div className="mt-1 text-xs">Sold by {d.agent.name}</div>)}
               {u.status === "AVAILABLE" && <Link href={`/reservations/new?unitId=${u.id}`} className="link mt-1 block text-xs">Reserve →</Link>}
               {manage && (
                 <details className="mt-2">
@@ -82,7 +83,9 @@ export default async function ProjectPage({
                       <option value={u.status}>{u.status}</option>
                       {u.status === "AVAILABLE" && <option value="BLOCKED">BLOCKED</option>}
                       {u.status === "BLOCKED" && <option value="AVAILABLE">AVAILABLE</option>}
+                      {u.status === "SOLD" && <option value="HANDED_OVER">HANDED OVER</option>}
                     </select>
+                    {u.kind === "PLOT" && <><input name="zoning" defaultValue={u.zoning ?? ""} placeholder="Zoning" className="input py-1" /><input name="titleStatus" defaultValue={u.titleStatus ?? ""} placeholder="Title status" className="input py-1" /></>}
                     <SubmitButton className="btn-secondary btn-sm w-full">Save</SubmitButton>
                   </form>
                 </details>
@@ -93,13 +96,16 @@ export default async function ProjectPage({
       </div>
       {manage && (
         <div className="mt-8 grid gap-6 lg:grid-cols-2">
-          <form action={addUnits} className="card grid grid-cols-3 gap-3">
-            <div className="col-span-3"><h2 className="h2">Add units</h2><p className="muted">Set count &gt; 1 to bulk-create e.g. A101…A110.</p></div>
+          <form action={addUnits} className="card grid grid-cols-2 gap-3 sm:grid-cols-3">
+            <div className="col-span-full"><h2 className="h2">Add units</h2><p className="muted">Set count &gt; 1 to bulk-create e.g. A101…A110.</p></div>
             <input type="hidden" name="projectId" value={project.id} />
             <div><label className="lbl">Code / prefix *</label><input name="code" className="input" required placeholder="A1" /></div>
             <div><label className="lbl">Count</label><input name="count" type="number" min={1} max={200} defaultValue={1} className="input" /></div>
             <div><label className="lbl">Start number</label><input name="start" type="number" defaultValue={1} className="input" /></div>
+            <div><label className="lbl">Kind</label><select name="kind" className="input"><option value="APARTMENT">Apartment / building unit</option><option value="PLOT">Land plot</option></select></div>
             <div><label className="lbl">Type</label><input name="type" className="input" placeholder="2BR / Shop / Villa" /></div>
+            <div><label className="lbl">Zoning (plots)</label><input name="zoning" className="input" placeholder="Residential" /></div>
+            <div><label className="lbl">Title status (plots)</label><input name="titleStatus" className="input" placeholder="Title deed ready" /></div>
             <div><label className="lbl">Size m²</label><input name="sizeSqm" className="input" /></div>
             <div><label className="lbl">Price ETB *</label><input name="price" className="input" required /></div>
             <div><label className="lbl">Block</label><input name="block" className="input" /></div>
