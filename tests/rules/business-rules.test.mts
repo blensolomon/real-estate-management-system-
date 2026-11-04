@@ -184,3 +184,93 @@ test("an agent cannot sell another agent's reservation or reserve for another ag
   const { reservation } = await reserveUnit(a1, { unitId: u.id, fullName: "L", phone: "0955000001", leadId: lead.id });
   await rejectsRule(createSale(a2, { reservationId: reservation.id, contractNo: "C-9", price: 1_000_000, signedAt: new Date(), firstDue: new Date(), plan: { type: "CASH", downPct: 100, months: 0 } }), /Not your reservation/);
 });
+
+const { checkPrice, requestPriceApproval, decidePriceApproval, NeedsApprovalError } = await import("../../src/lib/approvals");
+const { expireReservations, confirmDeposit, cancelReservation } = await import("../../src/lib/reservations");
+const { assignLeadOwner, moveLeads } = await import("../../src/lib/leads");
+
+async function reservedUnit(tag: string, deposit = 0) {
+  const co = await makeCompany(tag);
+  const agent = await co.user("AGENT");
+  const manager = await co.user("MANAGER");
+  const accountant = await co.user("ACCOUNTANT");
+  const u = await co.unit("D1");
+  const { reservation } = await reserveUnit(agent, { unitId: u.id, fullName: "Buyer", phone: `08${String(++seq).padStart(8, "0")}`, deposit });
+  return { co, agent, manager, accountant, u, reservation };
+}
+const sale = (reservationId: string, price: number) => ({ reservationId, contractNo: `C-${++seq}`, price, signedAt: new Date(), firstDue: new Date(), plan: { type: "CASH" as const, downPct: 100, months: 0 } });
+
+test("a price more than 5% below list needs Sales Manager/Owner approval", async () => {
+  const { agent, manager, reservation } = await reservedUnit("discount");
+  await createSale(agent, sale(reservation.id, 960_000)).then(async (d) => {
+    // 4% below is fine; undo nothing — just check the next case on a fresh reservation
+    assert.ok(d.id);
+  });
+  const r2 = await reservedUnit("discount2");
+  await assert.rejects(createSale(r2.agent, sale(r2.reservation.id, 940_000)), (e) => e instanceof NeedsApprovalError);
+  const req = await requestPriceApproval(r2.agent, r2.reservation.id, 940_000, "cash buyer");
+  await rejectsRule(requestPriceApproval(r2.agent, r2.reservation.id, 940_000, "again"), /already waiting/);
+  await rejectsRule(decidePriceApproval(r2.agent, req.id, true, ""), /Sales Manager or Owner/);
+  await rejectsRule(decidePriceApproval(r2.manager, req.id, false, ""), /reason/);
+  await decidePriceApproval(r2.manager, req.id, true, "ok");
+  await rejectsRule(decidePriceApproval(r2.manager, req.id, true, ""), /Already decided/);
+  await assert.rejects(createSale(r2.agent, sale(r2.reservation.id, 900_000)), (e) => e instanceof NeedsApprovalError);
+  const d = await createSale(r2.agent, sale(r2.reservation.id, 940_000));
+  const log = await db.auditLog.findFirstOrThrow({ where: { entityId: d.id, action: "deal.created" } });
+  assert.equal((log.after as { priceApprovalId: string }).priceApprovalId, req.id);
+  assert.equal(manager.role, "MANAGER");
+});
+
+test("a Sales Manager's own discounted sale is recorded as self-approved", async () => {
+  const { manager, reservation } = await reservedUnit("selfapprove");
+  const res = await checkPrice(manager, reservation.id, 1_000_000, 800_000);
+  assert.equal(res.needed, true);
+  const d = await createSale(manager, sale(reservation.id, 800_000));
+  const log = await db.auditLog.findFirstOrThrow({ where: { entityId: d.id, action: "deal.created" } });
+  assert.equal((log.after as { selfApproved: boolean }).selfApproved, true);
+});
+
+test("expired reservations are released unless the accountant confirmed the deposit", async () => {
+  const open = await reservedUnit("expire-open", 50_000);
+  const held = await reservedUnit("expire-held", 50_000);
+  await rejectsRule(confirmDeposit(held.agent, held.reservation.id, "FT1"), /accountant/);
+  await confirmDeposit(held.accountant, held.reservation.id, "FT1");
+  await rejectsRule(confirmDeposit(held.accountant, held.reservation.id, "FT1"), /already/);
+  const past = new Date(Date.now() - 3600_000);
+  await db.reservation.updateMany({ where: { id: { in: [open.reservation.id, held.reservation.id] } }, data: { expiresAt: past } });
+  await expireReservations(open.co.c.id);
+  await expireReservations(held.co.c.id);
+  assert.equal((await db.reservation.findUniqueOrThrow({ where: { id: open.reservation.id } })).status, "EXPIRED");
+  assert.equal((await db.unit.findUniqueOrThrow({ where: { id: open.u.id } })).status, "AVAILABLE");
+  assert.equal((await db.reservation.findUniqueOrThrow({ where: { id: held.reservation.id } })).status, "ACTIVE");
+  assert.equal((await db.unit.findUniqueOrThrow({ where: { id: held.u.id } })).status, "RESERVED");
+  await rejectsRule(cancelReservation(held.agent, held.reservation.id, "changed mind"), /only the Sales Manager or Owner/);
+  await rejectsRule(cancelReservation(held.manager, held.reservation.id, ""), /reason/);
+});
+
+test("a confirmed deposit becomes a confirmed payment with a receipt when the sale is made", async () => {
+  const { agent, accountant, reservation } = await reservedUnit("deposit-sale", 50_000);
+  await confirmDeposit(accountant, reservation.id, "FT-DEP-1");
+  const d = await createSale(agent, sale(reservation.id, 1_000_000));
+  const [p] = await db.payment.findMany({ where: { dealId: d.id } });
+  assert.equal(p.status, "CONFIRMED");
+  assert.equal(Number(p.amount), 50_000);
+  assert.equal(p.reference, "FT-DEP-1");
+  assert.equal(p.receiptNo, 1);
+});
+
+test("lead ownership: only Owner/Admin can move an owned lead; managers can only assign unowned leads", async () => {
+  const co = await makeCompany("leadlock");
+  const [a1, a2, manager, owner, admin] = [await co.user("AGENT", "1"), await co.user("AGENT", "2"), await co.user("MANAGER"), await co.user("OWNER"), await co.user("ADMIN")];
+  const owned = await db.lead.create({ data: { companyId: co.c.id, name: "L1", phone: "0966000001", source: "FACEBOOK", ownerId: a1.userId } });
+  const free = await db.lead.create({ data: { companyId: co.c.id, name: "L2", phone: "0966000002", source: "BILLBOARD" } });
+  await rejectsRule(assignLeadOwner(manager, owned.id, a2.userId), /Only the Owner or Admin/);
+  await rejectsRule(assignLeadOwner(a2, owned.id, a2.userId), /Only the Owner or Admin/);
+  await assignLeadOwner(manager, free.id, a2.userId);
+  await assignLeadOwner(owner, owned.id, a2.userId);
+  const log = await db.auditLog.findFirstOrThrow({ where: { entityId: owned.id, action: "lead.owner_override" } });
+  assert.deepEqual(log.before, { ownerId: a1.userId });
+  await rejectsRule(moveLeads(manager, a2.userId, a1.userId), /Only the Owner or Admin/);
+  const moved = await moveLeads(admin, a2.userId, a1.userId);
+  assert.equal(moved.count, 2);
+});

@@ -93,12 +93,15 @@ async function main() {
     if (i === 4) await db.payment.create({ data: { companyId: company.id, dealId: deal.id, amount: schedule[2].amount, paidAt: ago(1), method: "BANK_TRANSFER", reference: "FT2611ABX", recordedById: lead.ownerId!, status: "PENDING" } });
   }
 
-  // Active reservations: one ends tomorrow, one already past expiry (auto-expires), one with time left.
+  // Active reservations: one ends tomorrow, one past expiry with a confirmed deposit (held), one with time left and a discount waiting for approval.
   for (const [k, u, offset] of [[5, 12, 1], [6, 22, -1], [7, 13, 5]] as const) {
     const lead = leads[k];
     const unit = units[u];
     const client = await db.client.create({ data: { companyId: company.id, fullName: lead.name, phone: lead.phone, leadId: lead.id } });
-    await db.reservation.create({ data: { companyId: company.id, unitId: unit.id, clientId: client.id, agentId: lead.ownerId!, depositAmount: 50000, expiresAt: new Date(Date.now() + offset * day) } });
+    // The already-expired one has a confirmed deposit, so it stays held for the manager to decide.
+    const held = offset < 0 ? { depositConfirmedAt: ago(3), depositConfirmedById: accountant.id, depositRef: "FT-DEP-2611" } : {};
+    const r = await db.reservation.create({ data: { companyId: company.id, unitId: unit.id, clientId: client.id, agentId: lead.ownerId!, depositAmount: 50000, expiresAt: new Date(Date.now() + offset * day), ...held } });
+    if (offset === 5) await db.priceApproval.create({ data: { companyId: company.id, reservationId: r.id, listPrice: unit.price, price: Math.round(Number(unit.price) * 0.92), reason: "Cash buyer, pays in full this month", requestedById: lead.ownerId! } });
     await db.unit.update({ where: { id: unit.id }, data: { status: "RESERVED" } });
   }
   await db.unit.update({ where: { id: units[17].id }, data: { status: "BLOCKED" } });
