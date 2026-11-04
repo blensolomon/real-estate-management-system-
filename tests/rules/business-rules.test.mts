@@ -274,3 +274,39 @@ test("lead ownership: only Owner/Admin can move an owned lead; managers can only
   const moved = await moveLeads(admin, a2.userId, a1.userId);
   assert.equal(moved.count, 2);
 });
+
+test("sign-up creates a separate company with one Owner; emails are unique across companies", async () => {
+  const { createCompanyWithOwner } = await import("../../src/lib/tenancy");
+  const email = `owner-${Math.random()}@new.et`;
+  const { company, owner } = await createCompanyWithOwner({ company: PREFIX + "signup", name: "Abebe", email, password: "password123" });
+  assert.equal(owner.role, "OWNER");
+  assert.equal(owner.companyId, company.id);
+  assert.equal(await db.project.count({ where: { companyId: company.id } }), 0);
+  assert.equal(await db.auditLog.count({ where: { companyId: company.id, action: "company.create" } }), 1);
+  await assert.rejects(createCompanyWithOwner({ company: PREFIX + "dup", name: "X", email: email.toUpperCase(), password: "password123" }), RuleError);
+  await assert.rejects(createCompanyWithOwner({ company: PREFIX + "short", name: "X", email: `s-${Math.random()}@new.et`, password: "short" }), RuleError);
+});
+
+test("only platform admins can suspend a company, and suspension blocks its users", async () => {
+  const { setCompanyActive, accountActive } = await import("../../src/lib/tenancy");
+  const operator = await makeCompany("operator");
+  const opOwner = await operator.user("OWNER");
+  const opEmail = (await db.user.findUniqueOrThrow({ where: { id: opOwner.userId } })).email;
+  const tenant = await makeCompany("tenant");
+  const tenantOwner = await tenant.user("OWNER");
+  process.env.PLATFORM_ADMIN_EMAILS = "";
+  await assert.rejects(setCompanyActive(tenantOwner.userId, tenant.c.id, false, "x"), RuleError, "a company owner is not a platform admin");
+  await assert.rejects(setCompanyActive(opOwner.userId, tenant.c.id, false, "x"), RuleError);
+  process.env.PLATFORM_ADMIN_EMAILS = `someone@else.et, ${opEmail.toUpperCase()}`;
+  await assert.rejects(setCompanyActive(opOwner.userId, tenant.c.id, false, " "), RuleError, "reason required");
+  assert.equal(await accountActive(tenantOwner.userId, tenant.c.id), true);
+  await setCompanyActive(opOwner.userId, tenant.c.id, false, "Unpaid subscription");
+  assert.equal(await accountActive(tenantOwner.userId, tenant.c.id), false);
+  assert.equal(await accountActive(opOwner.userId, operator.c.id), true, "other companies are unaffected");
+  assert.equal(await accountActive(tenantOwner.userId, operator.c.id), false, "a session can't claim another company");
+  const log = await db.auditLog.findFirstOrThrow({ where: { companyId: tenant.c.id, action: "company.suspend" } });
+  assert.match(log.detail ?? "", /Unpaid subscription/);
+  await setCompanyActive(opOwner.userId, tenant.c.id, true, "");
+  assert.equal(await accountActive(tenantOwner.userId, tenant.c.id), true);
+  process.env.PLATFORM_ADMIN_EMAILS = "";
+});

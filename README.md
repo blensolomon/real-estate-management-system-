@@ -70,6 +70,13 @@ Reservations without a confirmed deposit are expired whenever relevant pages loa
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Optional S3-compatible storage (AWS S3, R2, MinIO). Leave `S3_BUCKET` empty to use local disk |
 | `TEST_DATABASE_URL` | Separate database for `npm run test:rules` |
 
+## Multiple companies (SaaS)
+
+- Every record carries a `companyId`; every query and server action is scoped to the signed-in user's company. Users belong to exactly one company (emails are unique platform-wide).
+- New companies sign up at `/register`, which creates an empty company and its first Owner. Set `SIGNUP_ENABLED=false` to close public sign-up.
+- Platform operators listed in `PLATFORM_ADMIN_EMAILS` get an "All companies (platform)" link (`/platform`): a list of companies with counts only (no tenant business data), plus Suspend (reason required, audited) and Reactivate.
+- Each request re-checks that the user and their company are still active, so suspending a company or deactivating a user signs them out immediately.
+
 ## Docker and backups
 
 ```bash
@@ -77,7 +84,11 @@ cp .env.example .env    # set AUTH_SECRET, CRON_SECRET, POSTGRES_PASSWORD, optio
 docker compose up -d --build
 ```
 
-This runs the app (migrations apply on start), PostgreSQL, and a `backup` service that writes `./backups/resms-YYYY-MM-DD.sql.gz` once a day and keeps 14 days (`BACKUP_KEEP_DAYS`). Restore: `gunzip -c backups/resms-<date>.sql.gz | docker compose exec -T db psql -U resms resms`.
+This runs the app (migrations apply on start), PostgreSQL, and a `backup` service that writes `./backups/resms-YYYY-MM-DD.sql.gz` once a day and keeps 14 days (`BACKUP_KEEP_DAYS`). The first backup is taken once the app is healthy. The app refuses to start unless `AUTH_SECRET` is at least 32 characters.
+
+- Load demo data (optional): `docker compose exec app npx prisma db seed`
+- Different host port: `APP_PORT=8080 docker compose up -d`
+- Serving over plain HTTP on a LAN IP (no HTTPS)? Set `COOKIE_SECURE=false`, otherwise login cookies are dropped by the browser. Use HTTPS (reverse proxy) for anything internet-facing. Restore: `gunzip -c backups/resms-<date>.sql.gz | docker compose exec -T db psql -U resms resms`.
 
 ## Business rules enforced by the database
 
