@@ -114,15 +114,17 @@ enum DocumentType {
 }
 
 model Company {
-  id              String       @id @default(cuid())
-  name            String
-  reservationDays Int          @default(7)
-  followUpDays    Int          @default(2)
-  calendar        CalendarPref @default(ETHIOPIAN)
-  locale          String       @default("en")
-  staleLeadDays   Int          @default(3)
-  receiptSeq      Int          @default(0)
-  createdAt       DateTime     @default(now())
+  id                  String          @id @default(cuid())
+  name                String
+  reservationDays     Int             @default(7)
+  followUpDays        Int             @default(2)
+  calendar            CalendarPref    @default(ETHIOPIAN)
+  locale              String          @default("en")
+  staleLeadDays       Int             @default(3)
+  receiptSeq          Int             @default(0)
+  discountApprovalPct Decimal         @default(5) @db.Decimal(5, 2)
+  priceApprovals      PriceApproval[]
+  createdAt           DateTime        @default(now())
 
   users        User[]
   projects     Project[]
@@ -153,19 +155,22 @@ model User {
   active       Boolean  @default(true)
   createdAt    DateTime @default(now())
 
-  leads             Lead[]             @relation("LeadOwner")
-  activities        Activity[]
-  followUps         FollowUp[]
-  reservations      Reservation[]
-  deals             Deal[]
-  paymentsRecorded  Payment[]          @relation("PaymentRecordedBy")
-  paymentsConfirmed Payment[]          @relation("PaymentConfirmedBy")
-  documents         Document[]
-  payouts           CommissionPayout[] @relation("PayoutAgent")
-  payoutsMade       CommissionPayout[] @relation("PayoutPaidBy")
-  payoutsApproved   CommissionPayout[] @relation("PayoutApprovedBy")
-  targets           SalesTarget[]
-  auditLogs         AuditLog[]
+  leads              Lead[]             @relation("LeadOwner")
+  activities         Activity[]
+  followUps          FollowUp[]
+  reservations       Reservation[]      @relation("ReservationAgent")
+  depositsConfirmed  Reservation[]      @relation("DepositConfirmedBy")
+  approvalsRequested PriceApproval[]    @relation("ApprovalRequestedBy")
+  approvalsDecided   PriceApproval[]    @relation("ApprovalDecidedBy")
+  deals              Deal[]
+  paymentsRecorded   Payment[]          @relation("PaymentRecordedBy")
+  paymentsConfirmed  Payment[]          @relation("PaymentConfirmedBy")
+  documents          Document[]
+  payouts            CommissionPayout[] @relation("PayoutAgent")
+  payoutsMade        CommissionPayout[] @relation("PayoutPaidBy")
+  payoutsApproved    CommissionPayout[] @relation("PayoutApprovedBy")
+  targets            SalesTarget[]
+  auditLogs          AuditLog[]
 
   @@index([companyId])
 }
@@ -292,23 +297,28 @@ model Client {
 }
 
 model Reservation {
-  id            String            @id @default(cuid())
-  companyId     String
-  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  unitId        String
-  unit          Unit              @relation(fields: [unitId], references: [id])
-  clientId      String
-  client        Client            @relation(fields: [clientId], references: [id])
-  agentId       String
-  agent         User              @relation(fields: [agentId], references: [id])
-  depositAmount Decimal           @default(0) @db.Decimal(14, 2)
-  expiresAt     DateTime
-  status        ReservationStatus @default(ACTIVE)
-  note          String?
-  createdAt     DateTime          @default(now())
-  closedAt      DateTime?
+  id                   String            @id @default(cuid())
+  companyId            String
+  company              Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  unitId               String
+  unit                 Unit              @relation(fields: [unitId], references: [id])
+  clientId             String
+  client               Client            @relation(fields: [clientId], references: [id])
+  agentId              String
+  agent                User              @relation("ReservationAgent", fields: [agentId], references: [id])
+  depositAmount        Decimal           @default(0) @db.Decimal(14, 2)
+  depositRef           String?
+  depositConfirmedAt   DateTime?
+  depositConfirmedById String?
+  depositConfirmedBy   User?             @relation("DepositConfirmedBy", fields: [depositConfirmedById], references: [id])
+  expiresAt            DateTime
+  status               ReservationStatus @default(ACTIVE)
+  note                 String?
+  createdAt            DateTime          @default(now())
+  closedAt             DateTime?
 
-  deal Deal?
+  deal           Deal?
+  priceApprovals PriceApproval[]
 
   @@index([companyId, status, expiresAt])
 }
@@ -472,4 +482,33 @@ model AuditLog {
 
   @@index([companyId, createdAt])
   @@index([companyId, entity, entityId])
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+/// A sale price below list price by more than Company.discountApprovalPct needs a Sales Manager/Owner decision.
+model PriceApproval {
+  id            String         @id @default(cuid())
+  companyId     String
+  company       Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  reservationId String
+  reservation   Reservation    @relation(fields: [reservationId], references: [id])
+  listPrice     Decimal        @db.Decimal(14, 2)
+  price         Decimal        @db.Decimal(14, 2)
+  reason        String?
+  status        ApprovalStatus @default(PENDING)
+  requestedById String
+  requestedBy   User           @relation("ApprovalRequestedBy", fields: [requestedById], references: [id])
+  decidedById   String?
+  decidedBy     User?          @relation("ApprovalDecidedBy", fields: [decidedById], references: [id])
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime       @default(now())
+
+  @@index([companyId, status])
+  @@index([reservationId])
 }
