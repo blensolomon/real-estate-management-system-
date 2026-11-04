@@ -90,7 +90,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                             </form>
                             <form action={reviewPayment} className="flex gap-1">
                               <input type="hidden" name="paymentId" value={p.id} /><input type="hidden" name="decision" value="reject" /><input type="hidden" name="returnTo" value={path} />
-                              <input name="reason" className="input w-28 py-1" placeholder="Reason" />
+                              <input name="reason" className="input w-20 py-1" placeholder="Reason" />
                               <SubmitButton className="btn-secondary btn-sm">Reject</SubmitButton>
                             </form>
                           </div>
@@ -106,7 +106,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                 <div className="col-span-full"><h3 className="font-semibold">Record a payment</h3><p className="muted">Recorded payments stay pending until Finance confirms them against the bank statement.</p></div>
                 <input type="hidden" name="dealId" value={deal.id} />
                 <div><label className="lbl">Amount (ETB)</label><input name="amount" className="input" defaultValue={f.overdueAmount || f.nextDue?.remaining || ""} required /></div>
-                <div><label className="lbl">Paid on</label><DateField name="paidAt" calendar={s.calendar} defaultValue={toDateInput(new Date())} required /></div>
+                <div className="col-span-2"><label className="lbl">Paid on</label><DateField name="paidAt" calendar={s.calendar} defaultValue={toDateInput(new Date())} required /></div>
                 <div><label className="lbl">Method</label><select name="method" className="input">{PAYMENT_METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></div>
                 <div><label className="lbl">Bank / Telebirr reference</label><input name="reference" className="input" placeholder="FT23…" /></div>
                 <div className="md:col-span-2"><label className="lbl">Receipt (PDF/image)</label><input name="receipt" type="file" accept="application/pdf,image/*" className="input" /></div>

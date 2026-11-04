@@ -5,6 +5,8 @@ import { NavLinks } from "@/components/NavLinks";
 import { formatEthiopian } from "@/lib/ethiopian";
 import { formatGregorian } from "@/lib/format";
 
+const ROLE_LABELS: Record<string, string> = { OWNER: "Owner", MANAGER: "Sales Manager", AGENT: "Agent", FINANCE: "Finance" };
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
   const now = new Date();
@@ -13,13 +15,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       <aside className="sticky top-0 flex h-screen w-60 shrink-0 flex-col bg-slate-900 text-slate-200">
         <Link href="/dashboard" className="block border-b border-slate-800 px-5 py-4">
           <div className="text-sm font-semibold text-white">{s.companyName}</div>
-          <div className="text-xs text-slate-400">Sales Manager</div>
+          <div className="text-xs text-slate-400">Sales management</div>
         </Link>
         <NavLinks role={s.role} />
         <div className="border-t border-slate-800 px-5 py-3 text-xs">
           <div className="text-slate-400">{formatEthiopian(now)} · {formatGregorian(now)}</div>
           <div className="mt-2 font-medium text-white">{s.name}</div>
-          <div className="text-slate-400">{s.role}</div>
+          <div className="text-slate-400">{ROLE_LABELS[s.role]}</div>
           <form action={logout}>
             <button className="mt-2 text-emerald-400 hover:underline cursor-pointer">Sign out</button>
           </form>

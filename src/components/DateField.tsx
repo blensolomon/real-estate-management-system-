@@ -48,18 +48,18 @@ export function DateField({
   const days = daysInEthiopianMonth(eth.year, eth.month);
   return (
     <div>
-      <div className="flex gap-1">
-        <select aria-label="Day" className="input w-20" value={Math.min(eth.day, days)} onChange={(e) => setEth({ ...eth, day: +e.target.value })}>
+      <div className="grid grid-cols-[3.75rem_minmax(0,1fr)_4.75rem] gap-1">
+        <select aria-label="Day" className="input min-w-0 px-1.5" value={Math.min(eth.day, days)} onChange={(e) => setEth({ ...eth, day: +e.target.value })}>
           {Array.from({ length: days }, (_, k) => k + 1).map((d) => (
             <option key={d} value={d}>{d}</option>
           ))}
         </select>
-        <select aria-label="Month" className="input" value={eth.month} onChange={(e) => setEth({ ...eth, month: +e.target.value })}>
+        <select aria-label="Month" className="input min-w-0 px-1.5" value={eth.month} onChange={(e) => setEth({ ...eth, month: +e.target.value })}>
           {ETHIOPIAN_MONTHS.map((m, k) => (
             <option key={m} value={k + 1}>{m}</option>
           ))}
         </select>
-        <select aria-label="Year" className="input w-24" value={eth.year} onChange={(e) => setEth({ ...eth, year: +e.target.value })}>
+        <select aria-label="Year" className="input min-w-0 px-1.5" value={eth.year} onChange={(e) => setEth({ ...eth, year: +e.target.value })}>
           {years.map((y) => (
             <option key={y} value={y}>{y}</option>
           ))}
