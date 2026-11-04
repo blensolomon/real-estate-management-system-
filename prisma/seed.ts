@@ -16,6 +16,7 @@ async function main() {
   });
   const hash = await bcrypt.hash("password123", 10);
   const company = await db.company.create({ data: { name: DEMO, reservationDays: 7, followUpDays: 2 } });
+  await db.documentRequirement.createMany({ data: [{ companyId: company.id, type: "CONTRACT", label: "Signed contract" }, { companyId: company.id, type: "ID", label: "Buyer ID / Kebele card" }] });
   const mk = (name: string, email: string, role: "OWNER" | "MANAGER" | "AGENT" | "ACCOUNTANT" | "ADMIN", external = false) =>
     db.user.create({ data: { companyId: company.id, name, email, role, external, passwordHash: hash } });
   const owner = await mk("Abebe Kebede", "owner@demo.et", "OWNER");
@@ -60,6 +61,7 @@ async function main() {
     await db.activity.create({ data: { companyId: company.id, leadId: lead.id, userId: agent.id, type: "CALL", note: "Initial call, shared price list", createdAt: ago(70 - i * 3) } });
     if (i >= 5 && i < 8) await db.activity.create({ data: { companyId: company.id, leadId: lead.id, userId: agent.id, type: "SITE_VISIT", note: "Visited site with family", createdAt: ago(5) } });
     if (i >= 5) await db.followUp.create({ data: { companyId: company.id, leadId: lead.id, assigneeId: agent.id, dueAt: ago(i % 2 ? 3 : -2), note: i % 2 ? "Call back about payment plan" : "Send floor plans" } });
+    if (i === 3 || i === 4) await db.followUp.create({ data: { companyId: company.id, leadId: lead.id, assigneeId: agent.id, type: "SITE_VISIT", projectId: lead.interestProjectId, dueAt: ago(0), note: "Site visit: show sample unit" } });
   }
 
   // Five sales, each partly paid.

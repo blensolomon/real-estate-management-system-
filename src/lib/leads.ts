@@ -1,5 +1,6 @@
 import { db } from "./db";
 import { audit } from "./audit";
+import { notify } from "./notifications";
 import { RuleError, type Actor } from "./rules";
 
 /**
@@ -19,6 +20,8 @@ export async function assignLeadOwner(actor: Actor, leadId: string, toUserId: st
     await tx.followUp.updateMany({ where: { leadId: lead.id, doneAt: null }, data: { assigneeId: to.id } });
     await tx.activity.create({ data: { companyId: actor.companyId, leadId: lead.id, userId: actor.userId, type: "REASSIGNED", note: `${lead.owner ? `Moved from ${lead.owner.name} to` : "Assigned to"} ${to.name}` } });
     await audit(actor, lead.ownerId ? "lead.owner_override" : "lead.assigned", "Lead", lead.id, `${lead.owner?.name ?? "unassigned"} → ${to.name}`, { before: { ownerId: lead.ownerId }, after: { ownerId: to.id } }, tx);
+    if (to.id !== actor.userId)
+      await notify(tx, { companyId: actor.companyId, userId: to.id, kind: "lead.assigned", title: `Lead assigned to you: ${lead.name}`, link: `/leads/${lead.id}` });
   });
   return to;
 }
@@ -40,6 +43,7 @@ export async function moveLeads(actor: Actor, fromUserId: string, toUserId: stri
     await tx.followUp.updateMany({ where: { leadId: { in: ids }, doneAt: null }, data: { assigneeId: to.id } });
     await tx.activity.createMany({ data: ids.map((leadId) => ({ companyId: actor.companyId, leadId, userId: actor.userId, type: "REASSIGNED" as const, note: `Moved from ${from.name} to ${to.name}` })) });
     await audit(actor, "lead.owner_override", "User", from.id, `${ids.length} open leads ${from.name} → ${to.name}`, { before: { ownerId: from.id, leadIds: ids }, after: { ownerId: to.id } }, tx);
+    await notify(tx, { companyId: actor.companyId, userId: to.id, kind: "lead.assigned", title: `${ids.length} leads moved to you from ${from.name}`, link: "/leads" });
   });
   return { count: ids.length, from, to };
 }

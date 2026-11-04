@@ -11,6 +11,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { DateField } from "@/components/DateField";
 import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reversePaymentAction, reviewPayment, uploadDealDocument, voidPaymentAction } from "../actions";
 import { planSummary } from "@/lib/plans";
+import { missingDocuments } from "@/lib/checklist";
 
 export default async function DealPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; error?: string }> }) {
   const s = await requireSession(FINANCE_VIEW);
@@ -30,6 +31,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
     },
   });
   if (!deal || (!seesAll(s.role) && deal.agentId !== s.userId)) notFound();
+  const missingDocs = missingDocuments(await db.documentRequirement.findMany({ where: { companyId: s.companyId } }), deal.documents);
   const f = dealFinancials(deal);
   const c = commissionState(deal, f.confirmed, deal.payouts);
   const finance = canConfirmPayments(s.role);
@@ -167,6 +169,9 @@ export default async function DealPage({ params, searchParams }: { params: Promi
 
           <div className="card space-y-3 text-sm">
             <h2 className="h2">Documents</h2>
+            {missingDocs.length > 0 && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800">Missing: {missingDocs.map((d) => d.label).join(", ")}</p>
+            )}
             {deal.documents.length === 0 && <Empty>No documents yet.</Empty>}
             <ul className="space-y-1">
               {deal.documents.map((d) => (

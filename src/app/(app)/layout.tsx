@@ -13,7 +13,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const s = await requireSession();
   const t = translator(s.locale);
   const now = new Date();
-  const me = await db.user.findUnique({ where: { id: s.userId }, select: { email: true } });
+  const [me, unread] = await Promise.all([
+    db.user.findUnique({ where: { id: s.userId }, select: { email: true } }),
+    db.notification.count({ where: { userId: s.userId, companyId: s.companyId, readAt: null } }),
+  ]);
+  const bell = (
+    <Link href="/notifications" aria-label={t("Notifications")} className="relative inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg text-lg hover:bg-slate-100/10">
+      <span aria-hidden>🔔</span>
+      {unread > 0 && <span className="absolute right-0 top-0 rounded-full bg-rose-600 px-1.5 text-[10px] font-semibold text-white">{unread > 99 ? "99+" : unread}</span>}
+    </Link>
+  );
   const footer = (
     <>
       <div className="text-slate-400">{formatEthiopian(now)} · {formatGregorian(now)}</div>
@@ -35,13 +44,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             <div className="text-sm font-semibold text-white">{s.companyName}</div>
             <div className="text-xs text-slate-400">{t("Sales management")}</div>
           </Link>
+          <div className="flex items-center justify-between border-b border-slate-800 px-3 py-1 text-xs text-slate-400">{t("Notifications")}{bell}</div>
           <NavLinks role={s.role} />
           <div className="border-t border-slate-800 px-5 py-3 text-xs [&_.font-medium]:text-white">{footer}</div>
         </aside>
         <div className="min-w-0 flex-1">
           <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white px-4 py-3 md:hidden print:hidden">
             <Link href="/dashboard" className="font-semibold text-slate-900">{s.companyName}</Link>
-            <span className="text-xs text-slate-500">{formatEthiopian(now)}</span>
+            <span className="flex items-center gap-1 text-xs text-slate-500">{formatEthiopian(now)}{bell}</span>
           </header>
           <main className="p-4 pb-24 md:p-8 md:pb-8 print:p-0">{children}</main>
         </div>

@@ -17,7 +17,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   const now = new Date();
   const endOfToday = new Date(now.getTime() + 86400000);
   const [items, users, staleLeads] = await Promise.all([
-    db.followUp.findMany({ where, include: { lead: true, assignee: true }, orderBy: { dueAt: "asc" }, take: 300 }),
+    db.followUp.findMany({ where, include: { lead: true, assignee: true, project: true }, orderBy: { dueAt: "asc" }, take: 300 }),
     db.user.findMany({ where: { companyId: s.companyId, active: true }, orderBy: { name: "asc" } }),
     db.lead.findMany({
       where: {
@@ -48,12 +48,21 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
                   <div>{fmtDate(f.dueAt, s.calendar)}</div>
                   {f.dueAt < now && <div className="text-xs text-rose-600">{daysBetween(f.dueAt, now)} days overdue</div>}
                 </td>
-                <td><Link href={`/leads/${f.lead.id}`} className="link font-medium">{f.lead.name}</Link><div className="text-xs text-slate-500">{f.lead.phone} · {f.note}</div></td>
+                <td><Link href={`/leads/${f.lead.id}`} className="link font-medium">{f.lead.name}</Link><div className="text-xs text-slate-500"><Badge tone={f.type === "SITE_VISIT" ? "amber" : "gray"}>{f.type}</Badge> {f.lead.phone} · {f.note}{f.project ? ` · ${f.project.name}` : ""}</div></td>
                 <td className="text-slate-600">{f.assignee.name}</td>
                 <td>
-                  <form action={completeFollowUp} className="flex gap-1">
+                  <form action={completeFollowUp} className="flex flex-wrap gap-1">
                     <input type="hidden" name="id" value={f.id} />
                     <input type="hidden" name="returnTo" value="/follow-ups" />
+                    {f.type === "SITE_VISIT" && (
+                      <select name="visitOutcome" className="input py-1" required defaultValue="">
+                        <option value="" disabled>How did it go?</option>
+                        <option value="INTERESTED">Interested</option>
+                        <option value="NEEDS_TIME">Needs time</option>
+                        <option value="NOT_INTERESTED">Not interested</option>
+                        <option value="NO_SHOW">Did not come</option>
+                      </select>
+                    )}
                     <input name="outcome" className="input py-1" placeholder="Outcome" required />
                     <SubmitButton className="btn-secondary btn-sm">Done</SubmitButton>
                   </form>
@@ -68,7 +77,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
 
   return (
     <div>
-      <PageHeader title="Follow-ups" sub="Every open lead should have a next step. Overdue items are visible to managers." />
+      <PageHeader title="Tasks & site visits" sub="Every open lead should have a next step. After a site visit, a follow-up call is scheduled automatically. Overdue items are visible to managers." />
       <Flash msg={sp.msg} error={sp.error} />
       {seesAll(s.role) && (
         <form className="mb-4 flex gap-2">
@@ -84,7 +93,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
         <Section title="Due today" list={today} tone="amber" />
         <Section title="Upcoming" list={upcoming} tone="blue" />
         <div className="card">
-          <h2 className="h2 mb-2">Open leads with no follow-up scheduled ({staleLeads.length})</h2>
+          <h2 className="h2 mb-2">Open leads with no next step ({staleLeads.length})</h2>
           {staleLeads.length === 0 ? <Empty>All open leads have a next step.</Empty> : (
             <ul className="grid gap-1 text-sm md:grid-cols-2">
               {staleLeads.map((l) => <li key={l.id}><Link href={`/leads/${l.id}`} className="link">{l.name}</Link> <span className="text-slate-500">· {l.owner?.name ?? "Unassigned"}</span></li>)}
