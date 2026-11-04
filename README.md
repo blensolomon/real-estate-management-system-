@@ -77,7 +77,11 @@ cp .env.example .env    # set AUTH_SECRET, CRON_SECRET, POSTGRES_PASSWORD, optio
 docker compose up -d --build
 ```
 
-This runs the app (migrations apply on start), PostgreSQL, and a `backup` service that writes `./backups/resms-YYYY-MM-DD.sql.gz` once a day and keeps 14 days (`BACKUP_KEEP_DAYS`). Restore: `gunzip -c backups/resms-<date>.sql.gz | docker compose exec -T db psql -U resms resms`.
+This runs the app (migrations apply on start), PostgreSQL, and a `backup` service that writes `./backups/resms-YYYY-MM-DD.sql.gz` once a day and keeps 14 days (`BACKUP_KEEP_DAYS`). The first backup is taken once the app is healthy. The app refuses to start unless `AUTH_SECRET` is at least 32 characters.
+
+- Load demo data (optional): `docker compose exec app npx prisma db seed`
+- Different host port: `APP_PORT=8080 docker compose up -d`
+- Serving over plain HTTP on a LAN IP (no HTTPS)? Set `COOKIE_SECURE=false`, otherwise login cookies are dropped by the browser. Use HTTPS (reverse proxy) for anything internet-facing. Restore: `gunzip -c backups/resms-<date>.sql.gz | docker compose exec -T db psql -U resms resms`.
 
 ## Business rules enforced by the database
 
