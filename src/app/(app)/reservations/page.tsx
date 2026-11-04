@@ -64,7 +64,7 @@ export default async function ReservationsPage({ searchParams }: { searchParams:
                     <td className="space-y-1">
                       {r.status === "ACTIVE" && (
                         <div className="flex flex-wrap gap-1">
-                          <Link href={`/deals/new?reservationId=${r.id}`} className="btn btn-sm">Convert to deal</Link>
+                          <Link href={`/deals/new?reservationId=${r.id}`} className="btn btn-sm">Make it a sale</Link>
                           {canManage(s.role) && (
                             <form action={extendReservation} className="flex gap-1">
                               <input type="hidden" name="id" value={r.id} />

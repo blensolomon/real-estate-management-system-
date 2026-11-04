@@ -1,79 +1,44 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import type { DocumentType, PaymentMethod } from "@prisma/client";
+import type { DocumentType, PaymentMethod, PlanType } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
-import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
-import { canConfirmPayments, seesAll, SALES, ACCOUNTS } from "@/lib/permissions";
+import { back, num, str } from "@/lib/actions-util";
+import { RuleError } from "@/lib/rules";
+import { createSale } from "@/lib/sales";
+import { confirmPayment, rejectPayment, reversePayment, voidPayment } from "@/lib/payments";
+import { seesAll, SALES, ACCOUNTS, FINANCE_VIEW } from "@/lib/permissions";
 import { parseDateInput } from "@/lib/format";
-import { buildSchedule, commissionState, sum } from "@/lib/finance";
+import { commissionState, sum } from "@/lib/finance";
 import { saveDocument, validFile } from "@/lib/documents";
 
 export async function createDeal(fd: FormData) {
   const s = await requireSession(SALES);
   const reservationId = str(fd, "reservationId");
-  const retry = `/deals/new?reservationId=${reservationId}`;
-  const r = await db.reservation.findFirst({
-    where: { id: reservationId, companyId: s.companyId, status: "ACTIVE" },
-    include: { unit: { include: { project: true } } },
-  });
-  if (!r) back("/reservations", { error: "Active reservation not found (it may have expired)" });
-  if (!seesAll(s.role) && r.agentId !== s.userId) back("/reservations", { error: "Not your reservation" });
-  const price = num(fd, "price");
-  const downPct = num(fd, "downPct");
-  const months = Math.floor(num(fd, "months"));
   const signedAt = parseDateInput(str(fd, "signedAt")) ?? new Date();
-  const firstDue = parseDateInput(str(fd, "firstDue")) ?? signedAt;
-  const contractNo = str(fd, "contractNo");
-  if (!(price > 0) || !(downPct >= 0 && downPct <= 100) || !(months >= 0 && months <= 120) || !contractNo)
-    back(retry, { error: "Check price, down payment %, months and contract number" });
-
   let dealId = "";
   try {
-    dealId = await db.$transaction(async (tx) => {
-      const flipped = await tx.unit.updateMany({ where: { id: r.unitId, status: "RESERVED" }, data: { status: "SOLD" } });
-      if (flipped.count !== 1) throw new Error("UNIT_STATE");
-      await tx.reservation.update({ where: { id: r.id }, data: { status: "CONVERTED", closedAt: new Date() } });
-      const deal = await tx.deal.create({
-        data: {
-          companyId: s.companyId,
-          contractNo,
-          unitId: r.unitId,
-          clientId: r.clientId,
-          agentId: r.agentId,
-          reservationId: r.id,
-          price,
-          commissionRate: r.unit.project.commissionRate,
-          signedAt,
-          installments: { create: buildSchedule(price, downPct, months, firstDue) },
-        },
-      });
-      if (Number(r.depositAmount) > 0) {
-        await tx.payment.create({
-          data: {
-            companyId: s.companyId,
-            dealId: deal.id,
-            amount: r.depositAmount,
-            paidAt: r.createdAt,
-            method: "OTHER",
-            reference: "Reservation deposit",
-            recordedById: s.userId,
-          },
-        });
-      }
-      const client = await tx.client.findUnique({ where: { id: r.clientId } });
-      if (client?.leadId) await tx.lead.update({ where: { id: client.leadId }, data: { status: "WON", lastActivityAt: new Date() } });
-      return deal.id;
+    const deal = await createSale(s, {
+      reservationId,
+      contractNo: str(fd, "contractNo"),
+      price: num(fd, "price"),
+      signedAt,
+      firstDue: parseDateInput(str(fd, "firstDue")) ?? signedAt,
+      plan: {
+        type: (str(fd, "planType") || "INSTALLMENT") as PlanType,
+        downPct: num(fd, "downPct"),
+        months: Math.floor(num(fd, "months") || 0),
+        bankName: str(fd, "bankName") || null,
+      },
     });
+    dealId = deal.id;
   } catch (e) {
-    if (isUniqueViolation(e)) back(retry, { error: "Contract number already used, or the unit already has a deal" });
-    if ((e as Error).message === "UNIT_STATE") back(retry, { error: "Unit is not in reserved state" });
+    if (e instanceof RuleError) back(`/deals/new?reservationId=${reservationId}`, { error: e.message });
     throw e;
   }
-  await audit(s, "deal.created", "Deal", dealId, `${contractNo} · ${r.unit.project.name} ${r.unit.code} · ${price}`);
-  redirect(`/deals/${dealId}?msg=Deal created`);
+  redirect(`/deals/${dealId}?msg=Sale created`);
 }
 
 async function loadDeal(dealId: string, roles?: Parameters<typeof requireSession>[0]) {
@@ -94,13 +59,13 @@ export async function recordPayment(fd: FormData) {
   const reference = str(fd, "reference");
   if (method !== "CASH" && !reference) back(path, { error: "Bank / Telebirr reference is required for non-cash payments" });
   if (reference) {
-    const dup = await db.payment.findFirst({ where: { companyId: s.companyId, reference, method, status: { not: "REJECTED" } } });
+    const dup = await db.payment.findFirst({ where: { companyId: s.companyId, reference, method, status: { in: ["PENDING", "CONFIRMED"] } } });
     if (dup) back(path, { error: `Reference ${reference} was already recorded on another payment` });
   }
   const file = fd.get("receipt");
   let receiptId: string | null = null;
   try {
-    if (validFile(file)) receiptId = (await saveDocument(s, file, "RECEIPT", { dealId: deal.id, clientId: deal.clientId })).id;
+    if (validFile(file)) receiptId = (await saveDocument(s, file, "PAYMENT_PROOF", { dealId: deal.id, clientId: deal.clientId })).id;
   } catch (e) {
     back(path, { error: (e as Error).message });
   }
@@ -108,33 +73,48 @@ export async function recordPayment(fd: FormData) {
     data: { companyId: s.companyId, dealId: deal.id, amount, paidAt, method, reference: reference || null, recordedById: s.userId, receiptId },
   });
   await audit(s, "payment.recorded", "Payment", p.id, `${deal.contractNo} ${amount} ${method} ${reference}`);
-  back(path, { msg: "Payment recorded. It counts toward the balance once Finance confirms it." });
+  back(path, { msg: "Payment recorded. It counts toward the balance once the accountant confirms it." });
 }
 
 export async function reviewPayment(fd: FormData) {
   const s = await requireSession(ACCOUNTS);
   const returnTo = str(fd, "returnTo") || "/payments";
-  const p = await db.payment.findFirst({ where: { id: str(fd, "paymentId"), companyId: s.companyId, status: "PENDING" }, include: { deal: true } });
-  if (!p) back(returnTo, { error: "Pending payment not found" });
-  if (!canConfirmPayments(s.role)) back(returnTo, { error: "Not allowed" });
-  const decision = str(fd, "decision");
-  if (decision === "confirm") {
-    const receiptNo = await db.$transaction(async (tx) => {
-      const c = await tx.company.update({ where: { id: s.companyId }, data: { receiptSeq: { increment: 1 } } });
-      await tx.payment.update({ where: { id: p.id }, data: { status: "CONFIRMED", confirmedById: s.userId, confirmedAt: new Date(), receiptNo: c.receiptSeq } });
-      return c.receiptSeq;
-    });
-    const all = await db.payment.findMany({ where: { dealId: p.dealId, status: "CONFIRMED" } });
-    if (sum(all.map((x) => Number(x.amount))) >= Number(p.deal.price) && p.deal.status === "ACTIVE")
-      await db.deal.update({ where: { id: p.dealId }, data: { status: "COMPLETED" } });
-    await audit(s, "payment.confirmed", "Payment", p.id, `${p.deal.contractNo} ${p.amount}`);
-    back(returnTo, { msg: `Payment confirmed. Receipt no. ${receiptNo} issued.` });
+  const id = str(fd, "paymentId");
+  try {
+    if (str(fd, "decision") === "confirm") {
+      const p = await confirmPayment(s, id);
+      back(returnTo, { msg: `Payment confirmed. Receipt no. ${p.receiptNo} issued.` });
+    }
+    await rejectPayment(s, id, str(fd, "reason"));
+  } catch (e) {
+    if (e instanceof RuleError) back(returnTo, { error: e.message });
+    throw e;
   }
-  const reason = str(fd, "reason");
-  if (!reason) back(returnTo, { error: "Give a reason for rejecting" });
-  await db.payment.update({ where: { id: p.id }, data: { status: "REJECTED", confirmedById: s.userId, confirmedAt: new Date(), rejectReason: reason } });
-  await audit(s, "payment.rejected", "Payment", p.id, `${p.deal.contractNo} ${p.amount}: ${reason}`);
   back(returnTo, { msg: "Payment rejected" });
+}
+
+export async function voidPaymentAction(fd: FormData) {
+  const s = await requireSession(FINANCE_VIEW);
+  const returnTo = str(fd, "returnTo") || "/payments";
+  try {
+    await voidPayment(s, str(fd, "paymentId"), str(fd, "reason"));
+  } catch (e) {
+    if (e instanceof RuleError) back(returnTo, { error: e.message });
+    throw e;
+  }
+  back(returnTo, { msg: "Payment voided. It stays in the history with your reason." });
+}
+
+export async function reversePaymentAction(fd: FormData) {
+  const s = await requireSession(ACCOUNTS);
+  const returnTo = str(fd, "returnTo") || "/payments";
+  try {
+    await reversePayment(s, str(fd, "paymentId"), str(fd, "reason"));
+  } catch (e) {
+    if (e instanceof RuleError) back(returnTo, { error: e.message });
+    throw e;
+  }
+  back(returnTo, { msg: "Reversal recorded. The original payment is kept; the balance is updated." });
 }
 
 export async function uploadDealDocument(fd: FormData) {
@@ -183,9 +163,9 @@ export async function cancelDeal(fd: FormData) {
   const reason = str(fd, "reason");
   if (!reason) back(`/deals/${deal.id}`, { error: "Reason required" });
   await db.$transaction([
-    db.deal.update({ where: { id: deal.id }, data: { status: "CANCELLED" } }),
+    db.deal.update({ where: { id: deal.id }, data: { status: "CANCELLED", cancelReason: reason } }),
     db.unit.update({ where: { id: deal.unitId }, data: { status: "AVAILABLE" } }),
   ]);
-  await audit(s, "deal.cancelled", "Deal", deal.id, reason);
+  await audit(s, "deal.cancelled", "Deal", deal.id, reason, { before: { status: deal.status, unitStatus: deal.unit.status }, after: { status: "CANCELLED", unitStatus: "AVAILABLE" } });
   back(`/deals/${deal.id}`, { msg: "Deal cancelled; unit released" });
 }

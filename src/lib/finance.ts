@@ -1,4 +1,4 @@
-import type { Installment, Payment, CommissionPayout } from "@prisma/client";
+import type { Installment, Payment, CommissionPayout, PlanType } from "@prisma/client";
 
 export type InstallmentState = {
   id: string;
@@ -103,6 +103,21 @@ export function buildSchedule(price: number, downPct: number, months: number, st
   } else if (down < price) {
     rows.push({ seq: 2, label: "Balance", dueDate: start, amount: round(price - down) });
   }
+  return rows;
+}
+
+export type PlanInput = { type: PlanType; downPct: number; months: number; bankName?: string | null };
+
+/** Schedule for a sale's payment plan. MORTGAGE: buyer's down payment, then one bank disbursement `months` later. */
+export function buildPlanSchedule(price: number, plan: PlanInput, start: Date) {
+  if (plan.type === "CASH") return [{ seq: 1, label: "Full payment", dueDate: start, amount: round(price) }];
+  if (plan.type === "INSTALLMENT") return buildSchedule(price, plan.downPct, plan.months, start);
+  const down = round((price * plan.downPct) / 100);
+  const due = new Date(start);
+  due.setUTCMonth(due.getUTCMonth() + Math.max(0, plan.months));
+  const rows = [];
+  if (down > 0) rows.push({ seq: 1, label: "Down payment", dueDate: start, amount: down });
+  rows.push({ seq: rows.length + 1, label: plan.bankName ? `Bank loan (${plan.bankName})` : "Bank loan", dueDate: due, amount: round(price - down) });
   return rows;
 }
 

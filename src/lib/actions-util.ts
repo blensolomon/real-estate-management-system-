@@ -15,6 +15,4 @@ export function back(path: string, params: { msg?: string; error?: string }): ne
   redirect(`${path}${path.includes("?") ? "&" : "?"}${q}`);
 }
 
-export function isUniqueViolation(e: unknown) {
-  return typeof e === "object" && e !== null && (e as { code?: string }).code === "P2002";
-}
+export { isUniqueViolation } from "./rules";

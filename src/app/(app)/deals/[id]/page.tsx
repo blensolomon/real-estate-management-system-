@@ -9,7 +9,8 @@ import { DOCUMENT_TYPES, PAYMENT_METHODS } from "@/lib/options";
 import { Badge, Empty, Flash, PageHeader, Stat } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { DateField } from "@/components/DateField";
-import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reviewPayment, uploadDealDocument } from "../actions";
+import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reversePaymentAction, reviewPayment, uploadDealDocument, voidPaymentAction } from "../actions";
+import { planSummary } from "@/lib/plans";
 
 export default async function DealPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ msg?: string; error?: string }> }) {
   const s = await requireSession(FINANCE_VIEW);
@@ -22,7 +23,8 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       client: true,
       agent: true,
       installments: true,
-      payments: { include: { recordedBy: true, confirmedBy: true, receipt: true }, orderBy: { paidAt: "desc" } },
+      plan: true,
+      payments: { include: { recordedBy: true, confirmedBy: true, receipt: true, reversedBy: true }, orderBy: { createdAt: "desc" } },
       documents: { include: { uploadedBy: true }, orderBy: { createdAt: "desc" } },
       payouts: { include: { approvedBy: true }, orderBy: { approvedAt: "asc" } },
     },
@@ -36,9 +38,9 @@ export default async function DealPage({ params, searchParams }: { params: Promi
   return (
     <div>
       <PageHeader
-        title={`Deal ${deal.contractNo}`}
+        title={`Sale ${deal.contractNo}`}
         sub={<>{deal.unit.project.name} · {deal.unit.code} · <Link className="link" href={`/clients/${deal.clientId}`}>{deal.client.fullName}</Link> ({deal.client.phone}) · agent {deal.agent.name} · signed {fmtDate(deal.signedAt, s.calendar)}</>}
-        actions={<Badge>{deal.status}</Badge>}
+        actions={<><a className="btn-secondary" href={`/api/statements/${deal.id}`} target="_blank">Client statement (PDF)</a><Badge>{deal.status}</Badge></>}
       />
       <Flash msg={sp.msg} error={sp.error} />
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5">
@@ -50,9 +52,10 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       </div>
 
       <div className="grid gap-6 xl:grid-cols-3">
-        <div className="space-y-6 xl:col-span-2">
+        <div className="min-w-0 space-y-6 xl:col-span-2">
           <div className="card overflow-x-auto p-0">
             <h2 className="h2 px-5 pt-4">Payment plan</h2>
+            <p className="muted px-5">{planSummary(deal.plan)}</p>
             <table className="tbl mt-2">
               <thead><tr><th>#</th><th>Item</th><th>Due</th><th>Amount</th><th>Paid</th><th>Remaining</th><th>Status</th></tr></thead>
               <tbody>
@@ -76,11 +79,11 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                   {deal.payments.map((p) => (
                     <tr key={p.id}>
                       <td>{fmtDate(p.paidAt, s.calendar)}</td>
-                      <td className="font-medium">{money(p.amount)}</td>
+                      <td className={`font-medium ${Number(p.amount) < 0 ? "text-rose-700" : ""}`}>{money(p.amount)}{p.reversalOfId && <div className="text-xs">Reversal</div>}{p.reversedBy && <div className="text-xs text-rose-600">Reversed</div>}</td>
                       <td>{label(p.method)}<div className="text-xs text-slate-500">{p.reference ?? "—"}</div></td>
                       <td>{p.receipt ? <a className="link" href={`/api/documents/${p.receipt.id}`} target="_blank">View</a> : <span className="text-xs text-amber-600">None</span>}</td>
                       <td>{p.recordedBy.name}<div className="text-xs text-slate-500">{fmtDateTime(p.createdAt, s.calendar)}</div></td>
-                      <td><Badge>{p.status}</Badge>{p.confirmedBy && <div className="text-xs text-slate-500">by {p.confirmedBy.name}</div>}{p.receiptNo != null && <Link href={`/payments/${p.id}/receipt`} className="link text-xs">Receipt {p.receiptNo}</Link>}{p.rejectReason && <div className="text-xs text-rose-600">{p.rejectReason}</div>}</td>
+                      <td><Badge>{p.status}</Badge>{p.confirmedBy && <div className="text-xs text-slate-500">by {p.confirmedBy.name}</div>}{p.receiptNo != null && <div className="text-xs"><Link href={`/payments/${p.id}/receipt`} className="link">Receipt {p.receiptNo}</Link> · <a className="link" href={`/api/receipts/${p.id}`} target="_blank">PDF</a></div>}{(p.rejectReason || p.voidReason) && <div className="text-xs text-rose-600">{p.rejectReason ?? p.voidReason}</div>}</td>
                       <td>
                         {finance && p.status === "PENDING" && (
                           <div className="flex flex-col gap-1">
@@ -95,6 +98,20 @@ export default async function DealPage({ params, searchParams }: { params: Promi
                             </form>
                           </div>
                         )}
+                        {p.status === "PENDING" && (finance || p.recordedById === s.userId) && (
+                          <form action={voidPaymentAction} className="mt-1 flex gap-1">
+                            <input type="hidden" name="paymentId" value={p.id} /><input type="hidden" name="returnTo" value={path} />
+                            <input name="reason" className="input w-20 py-1" placeholder="Why?" required />
+                            <SubmitButton className="btn-secondary btn-sm" confirm="Void this payment? It stays in the history.">Void</SubmitButton>
+                          </form>
+                        )}
+                        {finance && p.status === "CONFIRMED" && Number(p.amount) > 0 && !p.reversedBy && (
+                          <form action={reversePaymentAction} className="flex gap-1">
+                            <input type="hidden" name="paymentId" value={p.id} /><input type="hidden" name="returnTo" value={path} />
+                            <input name="reason" className="input w-20 py-1" placeholder="Why?" required />
+                            <SubmitButton className="btn-secondary btn-sm" confirm="Record a reversal for this confirmed payment?">Reverse</SubmitButton>
+                          </form>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -103,20 +120,20 @@ export default async function DealPage({ params, searchParams }: { params: Promi
             )}
             {deal.status !== "CANCELLED" && (
               <form id="pay" action={recordPayment} className="grid grid-cols-2 gap-3 border-t border-slate-100 p-5 md:grid-cols-3">
-                <div className="col-span-full"><h3 className="font-semibold">Record a payment</h3><p className="muted">Recorded payments stay pending until Finance confirms them against the bank statement.</p></div>
+                <div className="col-span-full"><h3 className="font-semibold">Record a payment</h3><p className="muted">Recorded payments stay pending until the accountant confirms them against the bank statement. Confirmed payments are locked; mistakes are fixed with a reversal.</p></div>
                 <input type="hidden" name="dealId" value={deal.id} />
                 <div><label className="lbl">Amount (ETB)</label><input name="amount" className="input" defaultValue={f.overdueAmount || f.nextDue?.remaining || ""} required /></div>
                 <div className="col-span-2"><label className="lbl">Paid on</label><DateField name="paidAt" calendar={s.calendar} defaultValue={toDateInput(new Date())} required /></div>
                 <div><label className="lbl">Method</label><select name="method" className="input">{PAYMENT_METHODS.map((m) => <option key={m} value={m}>{label(m)}</option>)}</select></div>
                 <div><label className="lbl">Bank / Telebirr reference</label><input name="reference" className="input" placeholder="FT23…" /></div>
-                <div className="md:col-span-2"><label className="lbl">Receipt (PDF/image)</label><input name="receipt" type="file" accept="application/pdf,image/*" className="input" /></div>
+                <div className="md:col-span-2"><label className="lbl">Proof: bank slip or screenshot</label><input name="receipt" type="file" accept="application/pdf,image/*" className="input" /></div>
                 <div><SubmitButton>Record payment</SubmitButton></div>
               </form>
             )}
           </div>
         </div>
 
-        <div className="space-y-6">
+        <div className="min-w-0 space-y-6">
           <div className="card space-y-2 text-sm">
             <h2 className="h2">Commission · {deal.agent.name}</h2>
             <div className="flex justify-between"><span className="text-slate-500">Rate</span><span>{Number(deal.commissionRate)}%</span></div>
@@ -169,10 +186,10 @@ export default async function DealPage({ params, searchParams }: { params: Promi
 
           {s.role === "OWNER" && deal.status !== "CANCELLED" && (
             <form action={cancelDeal} className="card space-y-2">
-              <h2 className="h2 text-rose-700">Cancel deal</h2>
+              <h2 className="h2 text-rose-700">Cancel sale</h2><p className="muted">The sale and its payments stay in the history.</p>
               <input type="hidden" name="dealId" value={deal.id} />
               <input name="reason" className="input" placeholder="Reason" required />
-              <SubmitButton className="btn-danger w-full" confirm="Cancel this deal and release the unit?">Cancel deal</SubmitButton>
+              <SubmitButton className="btn-danger w-full" confirm="Cancel this sale and release the unit?">Cancel sale</SubmitButton>
             </form>
           )}
         </div>

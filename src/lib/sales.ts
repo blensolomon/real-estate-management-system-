@@ -1,0 +1,69 @@
+import { db } from "./db";
+import { audit } from "./audit";
+import { buildPlanSchedule, type PlanInput } from "./finance";
+import { seesAll } from "./permissions";
+import { RuleError, isUniqueViolation, type Actor } from "./rules";
+
+export type SaleInput = {
+  reservationId: string;
+  contractNo: string;
+  price: number;
+  plan: PlanInput;
+  signedAt: Date;
+  firstDue: Date;
+};
+
+export function validatePlan(price: number, plan: PlanInput) {
+  if (!(price > 0)) throw new RuleError("Enter the final price");
+  if (!["CASH", "INSTALLMENT", "MORTGAGE"].includes(plan.type)) throw new RuleError("Choose a payment plan");
+  if (plan.type !== "CASH" && !(plan.downPct >= 0 && plan.downPct <= 100)) throw new RuleError("Down payment must be 0–100%");
+  if (plan.type === "INSTALLMENT" && !(Number.isInteger(plan.months) && plan.months >= 0 && plan.months <= 120)) throw new RuleError("Months must be 0–120");
+  if (plan.type === "MORTGAGE" && !(Number.isInteger(plan.months) && plan.months >= 0 && plan.months <= 24)) throw new RuleError("Bank payout month must be 0–24");
+}
+
+/** Converts an active reservation into a sale with its payment plan and schedule, in one transaction. */
+export async function createSale(actor: Actor, input: SaleInput) {
+  const r = await db.reservation.findFirst({
+    where: { id: input.reservationId, companyId: actor.companyId, status: "ACTIVE" },
+    include: { unit: { include: { project: true } } },
+  });
+  if (!r) throw new RuleError("Active reservation not found (it may have expired)");
+  if (!seesAll(actor.role) && r.agentId !== actor.userId) throw new RuleError("Not your reservation");
+  if (!input.contractNo.trim()) throw new RuleError("Enter the contract number");
+  const plan = { ...input.plan, downPct: input.plan.type === "CASH" ? 100 : input.plan.downPct, months: input.plan.type === "CASH" ? 0 : input.plan.months };
+  validatePlan(input.price, plan);
+  try {
+    return await db.$transaction(async (tx) => {
+      const flipped = await tx.unit.updateMany({ where: { id: r.unitId, status: "RESERVED" }, data: { status: "SOLD" } });
+      if (flipped.count !== 1) throw new RuleError("Unit is not in reserved state");
+      await tx.reservation.update({ where: { id: r.id }, data: { status: "CONVERTED", closedAt: new Date() } });
+      const deal = await tx.deal.create({
+        data: {
+          companyId: actor.companyId,
+          contractNo: input.contractNo,
+          unitId: r.unitId,
+          clientId: r.clientId,
+          agentId: r.agentId,
+          reservationId: r.id,
+          price: input.price,
+          commissionRate: r.unit.project.commissionRate,
+          signedAt: input.signedAt,
+          plan: { create: { type: plan.type, downPct: plan.downPct, months: plan.months, bankName: plan.bankName || null } },
+          installments: { create: buildPlanSchedule(input.price, plan, input.firstDue) },
+        },
+      });
+      if (Number(r.depositAmount) > 0) {
+        await tx.payment.create({
+          data: { companyId: actor.companyId, dealId: deal.id, amount: r.depositAmount, paidAt: r.createdAt, method: "OTHER", reference: `Reservation deposit ${r.id.slice(-6)}`, recordedById: actor.userId },
+        });
+      }
+      const client = await tx.client.findUnique({ where: { id: r.clientId } });
+      if (client?.leadId) await tx.lead.update({ where: { id: client.leadId }, data: { status: "WON", lastActivityAt: new Date() } });
+      await audit(actor, "deal.created", "Deal", deal.id, `${input.contractNo} · ${r.unit.project.name} ${r.unit.code} · ${input.price}`, { after: { price: input.price, listPrice: Number(r.unit.price), plan: plan.type } }, tx);
+      return deal;
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) throw new RuleError("Contract number already used, or the unit already has a sale");
+    throw e;
+  }
+}

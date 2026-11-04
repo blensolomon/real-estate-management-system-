@@ -4,66 +4,35 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
-import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
+import { back, num, str } from "@/lib/actions-util";
+import { RuleError } from "@/lib/rules";
 import { canManage, seesAll, SALES, MANAGERS } from "@/lib/permissions";
 import { addDays } from "@/lib/format";
-import { expireReservations } from "@/lib/reservations";
+import { expireReservations, reserveUnit } from "@/lib/reservations";
 
 export async function createReservation(fd: FormData) {
   const s = await requireSession(SALES);
   await expireReservations(s.companyId);
   const unitId = str(fd, "unitId");
   const leadId = str(fd, "leadId");
-  const retry = `/reservations/new?unitId=${unitId}&leadId=${leadId}`;
-  const company = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
-  const unit = await db.unit.findFirst({ where: { id: unitId, companyId: s.companyId }, include: { project: true } });
-  if (!unit) back(retry, { error: "Choose a unit" });
-
-  const fullName = str(fd, "fullName");
-  const phone = str(fd, "phone").replace(/\s+/g, "");
-  if (!fullName || !phone) back(retry, { error: "Buyer name and phone are required" });
-  const lead = leadId ? await db.lead.findFirst({ where: { id: leadId, companyId: s.companyId } }) : null;
-  if (lead && !seesAll(s.role) && lead.ownerId !== s.userId) back("/reservations", { error: "Not your lead" });
-
-  const days = canManage(s.role) && num(fd, "days") > 0 ? Math.min(90, Math.floor(num(fd, "days"))) : company.reservationDays;
-  const deposit = num(fd, "depositAmount");
-
+  let msg = "";
   try {
-    const reservation = await db.$transaction(async (tx) => {
-      // Conditional update is the lock: only one request can flip AVAILABLE -> RESERVED.
-      const flipped = await tx.unit.updateMany({ where: { id: unit.id, status: "AVAILABLE" }, data: { status: "RESERVED" } });
-      if (flipped.count !== 1) throw new Error("UNIT_TAKEN");
-      const client = await tx.client.upsert({
-        where: { companyId_phone: { companyId: s.companyId, phone } },
-        create: { companyId: s.companyId, fullName, phone, idNumber: str(fd, "idNumber") || null, leadId: lead?.id },
-        update: { fullName, idNumber: str(fd, "idNumber") || undefined, leadId: lead?.id ?? undefined },
-      });
-      const r = await tx.reservation.create({
-        data: {
-          companyId: s.companyId,
-          unitId: unit.id,
-          clientId: client.id,
-          agentId: lead?.ownerId ?? s.userId,
-          depositAmount: deposit > 0 ? deposit : 0,
-          expiresAt: addDays(new Date(), days),
-          note: str(fd, "note") || null,
-        },
-      });
-      if (lead) {
-        await tx.lead.update({ where: { id: lead.id }, data: { status: "NEGOTIATION", lastActivityAt: new Date() } });
-        await tx.activity.create({
-          data: { companyId: s.companyId, leadId: lead.id, userId: s.userId, type: "NOTE", note: `Reserved unit ${unit.code} (${unit.project.name}) for ${days} days` },
-        });
-      }
-      return r;
+    const { unit, days } = await reserveUnit(s, {
+      unitId,
+      leadId: leadId || undefined,
+      fullName: str(fd, "fullName"),
+      phone: str(fd, "phone"),
+      idNumber: str(fd, "idNumber"),
+      days: num(fd, "days"),
+      deposit: num(fd, "depositAmount"),
+      note: str(fd, "note"),
     });
-    await audit(s, "reservation.created", "Reservation", reservation.id, `${unit.project.name} ${unit.code}, ${days} days`);
+    msg = `Unit ${unit.code} reserved for ${days} days`;
   } catch (e) {
-    if ((e as Error).message === "UNIT_TAKEN" || isUniqueViolation(e))
-      back(retry, { error: `Unit ${unit.code} is no longer available. It was reserved or sold by someone else.` });
+    if (e instanceof RuleError) back(`/reservations/new?unitId=${unitId}&leadId=${leadId}`, { error: e.message });
     throw e;
   }
-  redirect(`/reservations?msg=Unit ${unit.code} reserved for ${days} days`);
+  redirect(`/reservations?msg=${encodeURIComponent(msg)}`);
 }
 
 async function loadActive(fd: FormData) {
