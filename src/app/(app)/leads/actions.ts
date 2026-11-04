@@ -2,10 +2,13 @@
 
 import { RuleError } from "@/lib/rules";
 import { assignLeadOwner } from "@/lib/leads";
+import { completeTask, createTask } from "@/lib/tasks";
+import { moveLeadStage } from "@/lib/pipeline";
+import { notify } from "@/lib/notifications";
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import type { ActivityType, LeadSource, LeadStatus } from "@prisma/client";
+import type { ActivityType, LeadSource, LeadStatus, TaskType, VisitOutcome } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession, type Session } from "@/lib/session";
 import { audit } from "@/lib/audit";
@@ -57,6 +60,8 @@ export async function createLead(fd: FormData) {
       note: "First contact",
     },
   });
+  if (ownerId !== s.userId)
+    await notify(db, { companyId: s.companyId, userId: ownerId, kind: "lead.assigned", title: `New lead assigned to you: ${name}`, link: `/leads/${lead.id}` });
   await audit(s, "lead.created", "Lead", lead.id, `${name} (${lead.source})`);
   redirect(`/leads/${lead.id}?msg=Lead created`);
 }
@@ -93,26 +98,6 @@ export async function logActivity(fd: FormData) {
   });
 }
 
-export async function changeStatus(fd: FormData) {
-  const s = await requireSession(SALES);
-  const lead = await loadLead(s, str(fd, "leadId"));
-  const status = str(fd, "status") as LeadStatus;
-  if (status === lead.status) back(`/leads/${lead.id}`, {});
-  await db.$transaction([
-    db.lead.update({ where: { id: lead.id }, data: { status, lastActivityAt: new Date() } }),
-    db.activity.create({
-      data: {
-        companyId: s.companyId,
-        leadId: lead.id,
-        userId: s.userId,
-        type: "STATUS_CHANGE",
-        note: `${lead.status} → ${status}${str(fd, "reason") ? `: ${str(fd, "reason")}` : ""}`,
-      },
-    }),
-  ]);
-  back(`/leads/${lead.id}`, { msg: "Status updated" });
-}
-
 export async function reassignLead(fd: FormData) {
   const s = await requireSession(MANAGERS);
   const leadId = str(fd, "leadId");
@@ -128,29 +113,42 @@ export async function reassignLead(fd: FormData) {
 
 export async function scheduleFollowUp(fd: FormData) {
   const s = await requireSession(SALES);
-  const lead = await loadLead(s, str(fd, "leadId"));
+  const leadId = str(fd, "leadId");
   const dueAt = parseDateInput(str(fd, "dueAt"));
-  if (!dueAt) back(`/leads/${lead.id}`, { error: "Pick a date" });
-  await db.followUp.create({
-    data: { companyId: s.companyId, leadId: lead.id, assigneeId: lead.ownerId ?? s.userId, dueAt, note: str(fd, "note") || null },
-  });
-  back(`/leads/${lead.id}`, { msg: "Follow-up scheduled" });
+  if (!dueAt) back(`/leads/${leadId}`, { error: "Pick a date" });
+  const type = (str(fd, "type") || "CALL") as TaskType;
+  try {
+    await createTask(s, { leadId, type, dueAt, note: str(fd, "note"), projectId: str(fd, "projectId") || null });
+  } catch (e) {
+    if (e instanceof RuleError) back(`/leads/${leadId}`, { error: e.message });
+    throw e;
+  }
+  back(`/leads/${leadId}`, { msg: type === "SITE_VISIT" ? "Site visit scheduled" : "Task scheduled" });
 }
 
 export async function completeFollowUp(fd: FormData) {
   const s = await requireSession(SALES);
-  const fu = await db.followUp.findFirst({ where: { id: str(fd, "id"), companyId: s.companyId, doneAt: null } });
   const returnTo = str(fd, "returnTo") || "/follow-ups";
-  if (!fu || (!seesAll(s.role) && fu.assigneeId !== s.userId)) back(returnTo, { error: "Follow-up not found" });
-  const outcome = str(fd, "outcome");
-  if (!outcome) back(returnTo, { error: "Record the outcome of the follow-up" });
-  const now = new Date();
-  await db.$transaction([
-    db.followUp.update({ where: { id: fu.id }, data: { doneAt: now, outcome } }),
-    db.activity.create({
-      data: { companyId: s.companyId, leadId: fu.leadId, userId: s.userId, type: "CALL", note: `Follow-up done: ${outcome}` },
-    }),
-    db.lead.update({ where: { id: fu.leadId }, data: { lastActivityAt: now } }),
-  ]);
-  back(returnTo, { msg: "Follow-up completed" });
+  let msg = "Task completed";
+  try {
+    const r = await completeTask(s, str(fd, "id"), { outcome: str(fd, "outcome"), visitOutcome: (str(fd, "visitOutcome") || null) as VisitOutcome | null });
+    if (r.followUp) msg = "Done. A follow-up call was scheduled automatically";
+  } catch (e) {
+    if (e instanceof RuleError) back(returnTo, { error: e.message });
+    throw e;
+  }
+  back(returnTo, { msg });
+}
+
+export async function moveStage(fd: FormData) {
+  const s = await requireSession(SALES);
+  const returnTo = str(fd, "returnTo") || "/pipeline";
+  try {
+    await moveLeadStage(s, str(fd, "leadId"), str(fd, "stage") as LeadStatus, str(fd, "reason"));
+  } catch (e) {
+    if (e instanceof RuleError) back(returnTo, { error: e.message });
+    throw e;
+  }
+  revalidatePath("/pipeline");
+  back(returnTo, { msg: "Stage updated" });
 }

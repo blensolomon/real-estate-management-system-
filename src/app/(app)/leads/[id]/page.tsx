@@ -5,10 +5,13 @@ import { requireSession } from "@/lib/session";
 import { canManage, seesAll, SALES } from "@/lib/permissions";
 import { fmtDate, fmtDateTime, label, money, toDateInput, addDays } from "@/lib/format";
 import { ACTIVITY_TYPES, LEAD_STATUSES } from "@/lib/options";
+
+const TASK_TYPES = ["CALL", "MESSAGE", "SITE_VISIT", "MEETING", "OTHER"] as const;
+const VISIT_OUTCOMES = ["INTERESTED", "NEEDS_TIME", "NOT_INTERESTED", "NO_SHOW"] as const;
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { DateField } from "@/components/DateField";
-import { changeStatus, completeFollowUp, logActivity, reassignLead, scheduleFollowUp } from "../actions";
+import { completeFollowUp, logActivity, moveStage, reassignLead, scheduleFollowUp } from "../actions";
 
 export default async function LeadPage({
   params,
@@ -26,7 +29,7 @@ export default async function LeadPage({
       owner: true,
       interestProject: true,
       activities: { include: { user: true }, orderBy: { createdAt: "desc" } },
-      followUps: { include: { assignee: true }, orderBy: { dueAt: "asc" } },
+      followUps: { include: { assignee: true, project: true }, orderBy: { dueAt: "asc" } },
       clients: { include: { deals: { include: { unit: true } }, reservations: { include: { unit: true } } } },
     },
   });
@@ -34,6 +37,7 @@ export default async function LeadPage({
   const users = canManage(s.role)
     ? await db.user.findMany({ where: { companyId: s.companyId, active: true }, orderBy: { name: "asc" } })
     : [];
+  const projects = await db.project.findMany({ where: { companyId: s.companyId }, orderBy: { name: "asc" }, select: { id: true, name: true } });
   const now = new Date();
   const open = lead.followUps.filter((f) => !f.doneAt);
   const done = lead.followUps.filter((f) => f.doneAt);
@@ -63,17 +67,23 @@ export default async function LeadPage({
           </form>
 
           <div className="card">
-            <h2 className="h2 mb-3">Follow-ups</h2>
-            {open.length === 0 && <Empty>No open follow-ups. Schedule one so this lead isn&apos;t lost.</Empty>}
+            <h2 className="h2 mb-3">Tasks & site visits</h2>
+            {open.length === 0 && <Empty>No open tasks. Schedule one so this lead isn&apos;t lost.</Empty>}
             <div className="space-y-2">
               {open.map((f) => (
                 <form key={f.id} action={completeFollowUp} className={`flex flex-wrap items-center gap-2 rounded-lg border p-3 ${f.dueAt < now ? "border-rose-200 bg-rose-50" : "border-slate-200"}`}>
                   <input type="hidden" name="id" value={f.id} />
                   <input type="hidden" name="returnTo" value={returnTo} />
                   <div className="min-w-48 flex-1 text-sm">
-                    <div className="font-medium">{fmtDate(f.dueAt, s.calendar)} {f.dueAt < now && <Badge tone="red">Overdue</Badge>}</div>
-                    <div className="text-slate-500">{f.note ?? "Follow up"} · {f.assignee.name}</div>
+                    <div className="font-medium"><Badge tone={f.type === "SITE_VISIT" ? "amber" : "gray"}>{f.type}</Badge> {fmtDate(f.dueAt, s.calendar)} {f.dueAt < now && <Badge tone="red">Overdue</Badge>}</div>
+                    <div className="text-slate-500">{f.note ?? "Follow up"}{f.project ? ` · ${f.project.name}` : ""} · {f.assignee.name}</div>
                   </div>
+                  {f.type === "SITE_VISIT" && (
+                    <select name="visitOutcome" className="input w-44" required defaultValue="">
+                      <option value="" disabled>How did it go?</option>
+                      {VISIT_OUTCOMES.map((v) => <option key={v} value={v}>{label(v)}</option>)}
+                    </select>
+                  )}
                   <input name="outcome" className="input w-64" placeholder="Outcome" required />
                   <SubmitButton className="btn-secondary">Done</SubmitButton>
                 </form>
@@ -81,7 +91,18 @@ export default async function LeadPage({
             </div>
             <form action={scheduleFollowUp} className="mt-4 flex flex-wrap items-end gap-2 border-t border-slate-100 pt-4">
               <input type="hidden" name="leadId" value={lead.id} />
+              <div><label className="lbl">Type</label>
+                <select name="type" className="input" defaultValue="CALL">
+                  {TASK_TYPES.map((v) => <option key={v} value={v}>{label(v)}</option>)}
+                </select>
+              </div>
               <div><label className="lbl">Due</label><DateField name="dueAt" calendar={s.calendar} defaultValue={toDateInput(addDays(now, 2))} required /></div>
+              <div><label className="lbl">Project (visits)</label>
+                <select name="projectId" className="input" defaultValue={lead.interestProjectId ?? ""}>
+                  <option value="">—</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              </div>
               <div className="flex-1"><label className="lbl">Note</label><input name="note" className="input" placeholder="e.g. Send price list" /></div>
               <SubmitButton className="btn-secondary">Schedule</SubmitButton>
             </form>
@@ -116,15 +137,20 @@ export default async function LeadPage({
             {lead.notes && <p className="rounded bg-slate-50 p-2 text-slate-600">{lead.notes}</p>}
           </div>
 
-          <form action={changeStatus} className="card space-y-2">
-            <h2 className="h2">Change status</h2>
-            <input type="hidden" name="leadId" value={lead.id} />
-            <select name="status" defaultValue={lead.status} className="input">
-              {LEAD_STATUSES.map((v) => <option key={v} value={v}>{label(v)}</option>)}
-            </select>
-            <input name="reason" className="input" placeholder="Reason (e.g. why lost)" />
-            <SubmitButton className="btn-secondary w-full">Update status</SubmitButton>
-          </form>
+          {lead.status !== "WON" && (
+            <form action={moveStage} className="card space-y-2">
+              <h2 className="h2">Change stage</h2>
+              <input type="hidden" name="leadId" value={lead.id} />
+              <input type="hidden" name="returnTo" value={`/leads/${lead.id}`} />
+              <select name="stage" defaultValue={lead.status} className="input">
+                {LEAD_STATUSES.filter((v) => v !== "WON").map((v) => <option key={v} value={v}>{label(v)}</option>)}
+              </select>
+              <input name="reason" className="input" placeholder="Reason (required for Lost)" />
+              <p className="muted text-xs">Won is set automatically when a sale is made.</p>
+              <SubmitButton className="btn-secondary w-full">Update stage</SubmitButton>
+            </form>
+          )}
+          {lead.status === "LOST" && lead.lostReason && <p className="muted text-sm">Lost: {lead.lostReason}</p>}
 
           {(s.role === "OWNER" || (s.role === "MANAGER" && !lead.ownerId)) && (
             <form action={reassignLead} className="card space-y-2">

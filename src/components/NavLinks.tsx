@@ -11,7 +11,8 @@ const SALES = ["OWNER", "MANAGER", "AGENT"];
 export const NAV_ITEMS: Item[] = [
   { href: "/dashboard", label: "Home", icon: "⌂" },
   { href: "/leads", label: "Leads", icon: "☺", roles: SALES },
-  { href: "/follow-ups", label: "Follow-ups", icon: "✓", roles: SALES },
+  { href: "/pipeline", label: "Pipeline", icon: "▥", roles: SALES },
+  { href: "/follow-ups", label: "Tasks & visits", icon: "✓", roles: SALES },
   { href: "/collections", label: "Who owes us money", icon: "!", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
   { href: "/inventory", label: "Units", icon: "▦" },
   { href: "/reservations", label: "Reservations", icon: "◷", roles: SALES },
