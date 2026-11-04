@@ -1,12 +1,11 @@
 import "server-only";
-import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { DocumentType, Prisma } from "@prisma/client";
 import { db } from "./db";
 import type { Session } from "./session";
+import { putObject } from "./storage";
 
-export const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR ?? "./uploads");
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED = ["application/pdf", "image/jpeg", "image/png", "image/webp", "image/heic"];
 
@@ -24,11 +23,9 @@ export async function saveDocument(
 ) {
   if (file.size > MAX_BYTES) throw new Error("File is larger than 10 MB");
   if (!ALLOWED.includes(file.type)) throw new Error("Only PDF and image files are allowed");
-  const dir = path.join(UPLOAD_DIR, s.companyId);
-  await mkdir(dir, { recursive: true });
   const ext = path.extname(file.name).slice(0, 10).replace(/[^.\w]/g, "");
-  const storagePath = path.join(s.companyId, `${randomUUID()}${ext}`);
-  await writeFile(path.join(UPLOAD_DIR, storagePath), Buffer.from(await file.arrayBuffer()));
+  const storagePath = `${s.companyId}/${randomUUID()}${ext}`;
+  await putObject(storagePath, Buffer.from(await file.arrayBuffer()), file.type);
   return tx.document.create({
     data: {
       companyId: s.companyId,
