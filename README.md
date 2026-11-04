@@ -58,6 +58,8 @@ New companies can sign up at `/register`.
 
 Reservations without a confirmed deposit are expired whenever relevant pages load. Prices more than the company's discount limit (default 5%) below list wait in **Price approvals** for the Sales Manager or Owner. For timely expiry in production, schedule:
 `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/expire-reservations`.
+Once a day (e.g. 07:00), call `/api/cron/notifications` the same way: it creates reminders for due tasks,
+reservations ending within 24 hours and installments due within 3 days or late, and emails them when `SMTP_URL` is set.
 
 ## Environment variables
 
@@ -65,7 +67,8 @@ Reservations without a confirmed deposit are expired whenever relevant pages loa
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection |
 | `AUTH_SECRET` | Session signing key (`openssl rand -base64 32`) |
-| `CRON_SECRET` | Bearer token for `/api/cron/expire-reservations` |
+| `CRON_SECRET` | Bearer token for `/api/cron/expire-reservations` and `/api/cron/notifications` |
+| `SMTP_URL`, `SMTP_FROM`, `APP_URL` | Optional: email notifications (in-app notifications always work) |
 | `UPLOAD_DIR` | Local folder for files when S3 is not configured |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Optional S3-compatible storage (AWS S3, R2, MinIO). Leave `S3_BUCKET` empty to use local disk |
 | `TEST_DATABASE_URL` | Separate database for `npm run test:rules` |
