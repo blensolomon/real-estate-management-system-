@@ -102,7 +102,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
               </table>
             )}
             {deal.status !== "CANCELLED" && (
-              <form action={recordPayment} className="grid grid-cols-2 gap-3 border-t border-slate-100 p-5 md:grid-cols-3">
+              <form id="pay" action={recordPayment} className="grid grid-cols-2 gap-3 border-t border-slate-100 p-5 md:grid-cols-3">
                 <div className="col-span-full"><h3 className="font-semibold">Record a payment</h3><p className="muted">Recorded payments stay pending until Finance confirms them against the bank statement.</p></div>
                 <input type="hidden" name="dealId" value={deal.id} />
                 <div><label className="lbl">Amount (ETB)</label><input name="amount" className="input" defaultValue={f.overdueAmount || f.nextDue?.remaining || ""} required /></div>

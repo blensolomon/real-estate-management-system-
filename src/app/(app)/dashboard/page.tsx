@@ -1,142 +1,191 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
-import { seesAll } from "@/lib/permissions";
+import { canManage, seesAll } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { loadCollections } from "@/lib/collections";
-import { commissionState, round } from "@/lib/finance";
-import { addDays, fmtDate, label, money } from "@/lib/format";
-import { toEthiopian } from "@/lib/ethiopian";
+import { round } from "@/lib/finance";
+import { addDays, daysBetween, fmtDate, money } from "@/lib/format";
+import { intlPhone, lastMonths, monthOf } from "@/lib/months";
+import { getT } from "@/i18n/server";
 import { Flash, PageHeader, Stat } from "@/components/ui";
+import { SubmitButton } from "@/components/SubmitButton";
+import { markLeadContacted } from "./actions";
 
-export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string }> }) {
+const short = (n: number) => (n >= 1e6 ? `${round(n / 1e6)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}K` : String(Math.round(n)));
+
+function Contact({ phone, t }: { phone: string; t: (s: string) => string }) {
+  const intl = intlPhone(phone);
+  return (
+    <>
+      <a href={`tel:${phone}`} className="btn-secondary btn-sm">{t("Call")}</a>
+      <a href={`https://wa.me/${intl}`} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">WhatsApp</a>
+      <a href={`https://t.me/+${intl}`} target="_blank" rel="noreferrer" className="btn-secondary btn-sm">Telegram</a>
+    </>
+  );
+}
+
+export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string; msg?: string; error?: string }> }) {
   const s = await requireSession();
   const sp = await searchParams;
+  const t = await getT();
   await expireReservations(s.companyId);
   const all = seesAll(s.role);
+  const sales = s.role !== "ACCOUNTANT" && s.role !== "ADMIN";
   const now = new Date();
+  const month = monthOf(now, s.calendar);
+  const months = lastMonths(6, s.calendar, now);
   const mine = all ? {} : { agentId: s.userId };
-  const leadScope = all ? { companyId: s.companyId } : { companyId: s.companyId, ownerId: s.userId };
+  const company = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
+  const staleBefore = addDays(now, -company.staleLeadDays);
 
-  // Month boundaries follow the company's calendar.
-  let monthStart: Date;
-  if (s.calendar === "ETHIOPIAN") {
-    const e = toEthiopian(now);
-    monthStart = addDays(now, -(e.day - 1));
-    monthStart = new Date(Math.floor((monthStart.getTime() + 3 * 3600000) / 86400000) * 86400000 - 3 * 3600000);
-  } else {
-    monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1) - 3 * 3600000);
-  }
-
-  const [col, units, reservationsExpiring, pendingPayments, overdueFollowUps, leadsBySource, leadsByStatus, monthDeals, monthCollected, agents] = await Promise.all([
+  const [col, units, expiring, pending, staleLeads, monthDeals, confirmed6, agents, targets] = await Promise.all([
     loadCollections(s),
-    db.unit.groupBy({ by: ["status"], where: { companyId: s.companyId }, _count: true, _sum: { price: true } }),
+    db.unit.groupBy({ by: ["status"], where: { companyId: s.companyId }, _count: true }),
     db.reservation.findMany({ where: { companyId: s.companyId, status: "ACTIVE", expiresAt: { lt: addDays(now, 2) }, ...mine }, include: { unit: true, client: true, agent: true }, orderBy: { expiresAt: "asc" } }),
     db.payment.aggregate({ where: { companyId: s.companyId, status: "PENDING", ...(all ? {} : { deal: { agentId: s.userId } }) }, _sum: { amount: true }, _count: true }),
-    db.followUp.count({ where: { companyId: s.companyId, doneAt: null, dueAt: { lt: now }, ...(all ? {} : { assigneeId: s.userId }) } }),
-    db.lead.groupBy({ by: ["source"], where: { ...leadScope, createdAt: { gte: addDays(now, -90) } }, _count: true }),
-    db.lead.groupBy({ by: ["status"], where: leadScope, _count: true }),
-    db.deal.findMany({ where: { companyId: s.companyId, signedAt: { gte: monthStart }, status: { not: "CANCELLED" }, ...mine } }),
-    db.payment.aggregate({ where: { companyId: s.companyId, status: "CONFIRMED", paidAt: { gte: monthStart }, ...(all ? {} : { deal: { agentId: s.userId } }) }, _sum: { amount: true } }),
-    all ? db.user.findMany({ where: { companyId: s.companyId, role: { in: ["AGENT", "MANAGER"] }, active: true } }) : Promise.resolve([]),
+    sales
+      ? db.lead.findMany({
+          where: { companyId: s.companyId, status: { notIn: ["WON", "LOST"] }, ...(all ? {} : { ownerId: s.userId }), OR: [{ lastActivityAt: { lt: staleBefore } }, { lastActivityAt: null, createdAt: { lt: staleBefore } }] },
+          include: { owner: true },
+          orderBy: { lastActivityAt: { sort: "asc", nulls: "first" } },
+          take: 15,
+        })
+      : Promise.resolve([]),
+    db.deal.findMany({ where: { companyId: s.companyId, signedAt: { gte: month.start, lt: month.end }, status: { not: "CANCELLED" }, ...mine } }),
+    db.payment.findMany({ where: { companyId: s.companyId, status: "CONFIRMED", paidAt: { gte: months[0].start }, ...(all ? {} : { deal: { agentId: s.userId } }) }, select: { amount: true, paidAt: true } }),
+    db.user.findMany({ where: { companyId: s.companyId, active: true, role: "AGENT", ...(all ? {} : { id: s.userId }) }, orderBy: { name: "asc" } }),
+    db.salesTarget.findMany({ where: { companyId: s.companyId, month: month.key } }),
   ]);
 
-  const unitCount = (st: string) => units.find((u) => u.status === st)?._count ?? 0;
+  const count = (st: string) => units.find((u) => u.status === st)?._count ?? 0;
   const totalUnits = units.reduce((a, u) => a + u._count, 0);
-  const commissionPayable = round(col.rows.reduce((a, { deal, f }) => a + commissionState(deal, f.confirmed, deal.payouts).payable, 0));
-  const topDebtors = [...col.rows].filter((r) => r.f.overdueAmount > 0).sort((a, b) => b.f.overdueAmount - a.f.overdueAmount).slice(0, 8);
-  const maxSource = Math.max(1, ...leadsBySource.map((l) => l._count));
+  const soldValue = monthDeals.reduce((a, d) => a + Number(d.price), 0);
+  const collectedMonth = confirmed6.filter((p) => p.paidAt >= month.start).reduce((a, p) => a + Number(p.amount), 0);
+  const late = col.rows.filter((r) => r.f.overdueAmount > 0).sort((a, b) => b.f.oldestOverdueDays - a.f.oldestOverdueDays);
+  const attentionCount = late.length + expiring.length + staleLeads.length;
 
-  const agentRows = agents.map((a) => {
-    const deals = col.rows.filter((r) => r.deal.agentId === a.id);
-    return {
-      a,
-      deals: deals.length,
-      sold: round(deals.reduce((x, r) => x + r.f.price, 0)),
-      collected: round(deals.reduce((x, r) => x + r.f.confirmed, 0)),
-      overdue: round(deals.reduce((x, r) => x + r.f.overdueAmount, 0)),
-    };
+  const collectedByMonth = months.map((m) => ({ m, v: confirmed6.filter((p) => p.paidAt >= m.start && p.paidAt < m.end).reduce((a, p) => a + Number(p.amount), 0) }));
+  const maxCol = Math.max(1, ...collectedByMonth.map((x) => x.v));
+  const agentBars = agents.map((a) => {
+    const sold = monthDeals.filter((d) => d.agentId === a.id).reduce((x, d) => x + Number(d.price), 0);
+    const target = Number(targets.find((g) => g.userId === a.id)?.amount ?? 0);
+    return { a, sold, target };
   }).sort((x, y) => y.sold - x.sold);
-  const funnel = ["NEW", "CONTACTED", "SITE_VISIT", "NEGOTIATION", "WON", "LOST"].map((st) => ({ st, n: leadsByStatus.find((l) => l.status === st)?._count ?? 0 }));
+  const maxAgent = Math.max(1, ...agentBars.map((x) => Math.max(x.sold, x.target)));
 
   return (
     <div>
-      <PageHeader title={all ? "Owner dashboard" : "My dashboard"} sub={`As of ${fmtDate(now, s.calendar)}. Numbers are live.`} />
-      {sp.denied && <Flash error="You don't have access to that page." />}
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-        <Stat label="Overdue from buyers" value={money(col.overdue)} tone="red" href="/collections" sub={`${col.rows.filter((r) => r.f.overdueAmount > 0).length} buyers overdue`} />
-        <Stat label="Outstanding balance" value={money(col.outstanding)} href="/collections?view=all" sub={`of ${money(col.contracted)} contracted`} />
-        <Stat label="Awaiting confirmation" value={money(pendingPayments._sum.amount)} tone="amber" href="/payments" sub={`${pendingPayments._count} payments to verify`} />
-        <Stat label="Collected this month" value={money(monthCollected._sum.amount)} tone="green" sub={`${monthDeals.length} deals signed · ${money(monthDeals.reduce((a, d) => a + Number(d.price), 0))}`} />
-        <Stat label="Available units" value={`${unitCount("AVAILABLE")} / ${totalUnits}`} href="/inventory" sub={`${unitCount("RESERVED")} reserved · ${unitCount("SOLD")} sold · ${unitCount("BLOCKED")} blocked`} />
-        <Stat label="Reservations expiring ≤48h" value={reservationsExpiring.length} tone={reservationsExpiring.length ? "amber" : undefined} href="/reservations" />
-        <Stat label="Overdue follow-ups" value={overdueFollowUps} tone={overdueFollowUps ? "red" : undefined} href="/follow-ups" />
-        <Stat label={all ? "Commission payable now" : "My commission payable"} value={money(commissionPayable)} href="/commissions" />
+      <PageHeader title={all ? t("Today at a glance") : t("My day")} sub={t("{month} · numbers update live", { month: month.label })} />
+      {sp.denied && <Flash error={t("You don't have access to that page.")} />}
+      <Flash msg={sp.msg} error={sp.error} />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+        <Stat label={t("Sold this month")} value={money(soldValue)} tone="green" href="/deals" sub={t("{n} sales", { n: monthDeals.length })} />
+        <Stat label={t("Collected this month")} value={money(collectedMonth)} tone="green" href="/payments?status=CONFIRMED" sub={t("Confirmed by the accountant")} />
+        <Stat label={t("Late payments")} value={money(col.overdue)} tone={col.overdue > 0 ? "red" : "green"} href="/collections" sub={t("{n} buyers are late", { n: late.length })} />
+        <Stat label={t("Units available")} value={`${count("AVAILABLE")} / ${totalUnits}`} tone="green" href="/inventory" sub={t("{r} reserved · {s} sold", { r: count("RESERVED"), s: count("SOLD") })} />
+        <Stat label={t("Waiting for confirmation")} value={money(pending._sum.amount)} tone={pending._count ? "amber" : undefined} href="/payments" sub={t("{n} payments to check", { n: pending._count })} />
+        <Stat label={t("Needs attention")} value={attentionCount} tone={attentionCount ? "amber" : "green"} href="#attention" sub={t("Late buyers, expiring holds, quiet leads")} />
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-2">
-        <div className="card overflow-x-auto p-0">
-          <div className="flex items-center justify-between px-5 pt-4"><h2 className="h2">Top overdue buyers</h2><Link href="/collections" className="link text-sm">All →</Link></div>
-          <table className="tbl mt-2">
-            <thead><tr><th>Buyer</th><th>Unit</th><th>Overdue</th><th>Days</th><th>Agent</th></tr></thead>
-            <tbody>
-              {topDebtors.map(({ deal, f }) => (
-                <tr key={deal.id}>
-                  <td><Link href={`/deals/${deal.id}`} className="link">{deal.client.fullName}</Link><div className="text-xs text-slate-500">{deal.client.phone}</div></td>
-                  <td>{deal.unit.code}</td><td className="font-semibold text-rose-700">{money(f.overdueAmount)}</td><td>{f.oldestOverdueDays}</td><td>{deal.agent.name}</td>
-                </tr>
-              ))}
-              {topDebtors.length === 0 && <tr><td colSpan={5} className="text-center text-slate-500">Nobody is overdue.</td></tr>}
-            </tbody>
-          </table>
+      <section id="attention" className="card mt-6 p-0">
+        <div className="flex items-center justify-between px-4 pt-4">
+          <h2 className="h2">{t("Needs attention")}</h2>
+          <span className="text-xs text-slate-500">{t("Oldest first")}</span>
         </div>
+        {attentionCount === 0 && <p className="px-4 py-6 text-center text-sm text-emerald-700">{t("All clear. Nothing needs you right now.")}</p>}
+        <ul className="divide-y divide-slate-100">
+          {late.slice(0, 10).map(({ deal, f }) => (
+            <li key={`d${deal.id}`} className="flex flex-wrap items-center gap-2 px-4 py-3">
+              <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-rose-600" aria-hidden />
+              <div className="min-w-0 flex-1">
+                <Link href={`/deals/${deal.id}`} className="font-medium hover:underline">{deal.client.fullName}</Link>
+                <div className="text-sm text-rose-700">{t("{amount} late by {days} days", { amount: money(f.overdueAmount), days: f.oldestOverdueDays })}</div>
+                <div className="text-xs text-slate-500">{deal.unit.project.name} {deal.unit.code} · {deal.agent.name}</div>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                <Contact phone={deal.client.phone} t={t} />
+                <Link href={`/deals/${deal.id}#pay`} className="btn btn-sm">{t("Record payment")}</Link>
+              </div>
+            </li>
+          ))}
+          {expiring.map((r) => {
+            const hours = Math.max(0, Math.round((r.expiresAt.getTime() - now.getTime()) / 3600000));
+            return (
+              <li key={`r${r.id}`} className="flex flex-wrap items-center gap-2 px-4 py-3">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <div className="font-medium">{r.client.fullName} · {r.unit.code}</div>
+                  <div className="text-sm text-amber-700">{t("Reservation ends in {h} hours", { h: hours })}</div>
+                  <div className="text-xs text-slate-500">{r.agent.name}</div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Contact phone={r.client.phone} t={t} />
+                  {sales && <Link href={`/deals/new?reservationId=${r.id}`} className="btn btn-sm">{t("Make it a sale")}</Link>}
+                  {canManage(s.role) && <Link href="/reservations" className="btn-secondary btn-sm">{t("Extend")}</Link>}
+                </div>
+              </li>
+            );
+          })}
+          {staleLeads.map((l) => {
+            const last = l.lastActivityAt ?? l.createdAt;
+            return (
+              <li key={`l${l.id}`} className="flex flex-wrap items-center gap-2 px-4 py-3">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
+                <div className="min-w-0 flex-1">
+                  <Link href={`/leads/${l.id}`} className="font-medium hover:underline">{l.name}</Link>
+                  <div className="text-sm text-amber-700">{t("No contact for {d} days", { d: daysBetween(last, now) })}</div>
+                  <div className="text-xs text-slate-500">{l.owner?.name ?? t("Unassigned")}</div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  <Contact phone={l.phone} t={t} />
+                  <form action={markLeadContacted}>
+                    <input type="hidden" name="leadId" value={l.id} />
+                    <SubmitButton className="btn btn-sm">{t("Mark done")}</SubmitButton>
+                  </form>
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+        {late.length > 10 && <Link href="/collections" className="block px-4 py-3 text-sm text-emerald-700">{t("See all {n} late buyers", { n: late.length })} →</Link>}
+      </section>
 
-        {all ? (
-          <div className="card overflow-x-auto p-0">
-            <h2 className="h2 px-5 pt-4">Sales by agent</h2>
-            <table className="tbl mt-2">
-              <thead><tr><th>Agent</th><th>Deals</th><th>Sold</th><th>Collected</th><th>Overdue</th></tr></thead>
-              <tbody>
-                {agentRows.map((r) => (
-                  <tr key={r.a.id}><td>{r.a.name}</td><td>{r.deals}</td><td>{money(r.sold)}</td><td className="text-emerald-700">{money(r.collected)}</td><td className={r.overdue ? "text-rose-600" : ""}>{money(r.overdue)}</td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="card">
-            <h2 className="h2 mb-3">Reservations expiring soon</h2>
-            {reservationsExpiring.length === 0 ? <p className="muted">None.</p> : reservationsExpiring.map((r) => (
-              <div key={r.id} className="flex justify-between border-b border-slate-100 py-1 text-sm"><span>{r.unit.code} · {r.client.fullName}</span><span className="text-rose-600">{fmtDate(r.expiresAt, s.calendar)}</span></div>
-            ))}
-          </div>
-        )}
-
-        <div className="card">
-          <h2 className="h2 mb-3">Lead sources (last 90 days)</h2>
-          <div className="space-y-2">
-            {leadsBySource.sort((a, b) => b._count - a._count).map((l) => (
-              <div key={l.source} className="flex items-center gap-3 text-sm">
-                <div className="w-24 shrink-0">{label(l.source)}</div>
-                <div className="h-4 flex-1 rounded bg-slate-100"><div className="h-4 rounded bg-emerald-600" style={{ width: `${(l._count / maxSource) * 100}%` }} /></div>
-                <div className="w-8 text-right">{l._count}</div>
+      <div className="mt-6 grid gap-6 lg:grid-cols-2">
+        <section className="card">
+          <h2 className="h2">{t("Money collected per month")}</h2>
+          <div className="mt-4 flex h-40 items-end gap-2">
+            {collectedByMonth.map(({ m, v }) => (
+              <div key={m.key} className="flex flex-1 flex-col items-center gap-1">
+                <span className="text-[11px] text-slate-500">{short(v)}</span>
+                <div className="w-full rounded-t bg-emerald-600" style={{ height: `${Math.max(2, (v / maxCol) * 110)}px` }} />
+                <span className="truncate text-[11px] text-slate-500">{m.label.split(" ")[0].slice(0, 3)}</span>
               </div>
             ))}
-            {leadsBySource.length === 0 && <p className="muted">No leads yet.</p>}
           </div>
-        </div>
-
-        <div className="card">
-          <h2 className="h2 mb-3">Lead pipeline</h2>
-          <div className="grid grid-cols-6 gap-2 text-center text-xs">
-            {funnel.map((f) => (
-              <Link key={f.st} href={`/leads?status=${f.st}`} className="rounded-lg bg-slate-50 p-3 hover:bg-slate-100">
-                <div className="text-xl font-semibold text-slate-800">{f.n}</div>{label(f.st)}
-              </Link>
-            ))}
+        </section>
+        <section className="card">
+          <h2 className="h2">{t("Sales this month vs target")}</h2>
+          <div className="mt-4 space-y-3">
+            {agentBars.length === 0 && <p className="muted">{t("No agents yet. Add them in Settings.")}</p>}
+            {agentBars.map(({ a, sold, target }) => {
+              const tone = !target ? "bg-slate-400" : sold >= target ? "bg-emerald-600" : sold >= target * 0.5 ? "bg-amber-500" : "bg-rose-500";
+              return (
+                <div key={a.id} className="text-sm">
+                  <div className="flex justify-between"><span>{a.name}</span><span className="text-slate-500">{short(sold)}{target ? ` / ${short(target)}` : ""}</span></div>
+                  <div className="relative mt-1 h-3 rounded bg-slate-100">
+                    <div className={`h-3 rounded ${tone}`} style={{ width: `${(sold / maxAgent) * 100}%` }} />
+                    {target > 0 && <div className="absolute top-[-2px] h-4 w-0.5 bg-slate-700" style={{ left: `${(target / maxAgent) * 100}%` }} title={t("Target")} />}
+                  </div>
+                </div>
+              );
+            })}
           </div>
-        </div>
+          {canManage(s.role) && <Link href="/targets" className="mt-3 inline-block text-sm text-emerald-700">{t("Set targets")} →</Link>}
+        </section>
       </div>
+      <p className="mt-4 text-xs text-slate-400">{t("Today")}: {fmtDate(now, s.calendar)}</p>
     </div>
   );
 }
