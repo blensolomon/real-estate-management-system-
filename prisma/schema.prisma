@@ -33,6 +33,7 @@ enum LeadSource {
   WEBSITE
   TIKTOK
   PHONE
+  BILLBOARD
   OTHER
 }
 
@@ -59,7 +60,19 @@ enum UnitStatus {
   AVAILABLE
   RESERVED
   SOLD
+  HANDED_OVER
   BLOCKED
+}
+
+enum UnitKind {
+  APARTMENT
+  PLOT
+}
+
+enum PlanType {
+  CASH
+  INSTALLMENT
+  MORTGAGE
 }
 
 enum ReservationStatus {
@@ -88,12 +101,15 @@ enum PaymentStatus {
   PENDING
   CONFIRMED
   REJECTED
+  VOID
 }
 
 enum DocumentType {
   CONTRACT
   ID
   RECEIPT
+  PAYMENT_PROOF
+  TITLE
   OTHER
 }
 
@@ -170,19 +186,23 @@ model Project {
 }
 
 model Unit {
-  id        String     @id @default(cuid())
-  companyId String
-  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  projectId String
-  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  code      String
-  block     String?
-  floor     Int?
-  type      String?
-  sizeSqm   Decimal?   @db.Decimal(10, 2)
-  price     Decimal    @db.Decimal(14, 2)
-  status    UnitStatus @default(AVAILABLE)
-  createdAt DateTime   @default(now())
+  id          String     @id @default(cuid())
+  companyId   String
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId   String
+  project     Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code        String
+  block       String?
+  floor       Int?
+  kind        UnitKind   @default(APARTMENT)
+  type        String?
+  sizeSqm     Decimal?   @db.Decimal(10, 2)
+  /// Plot-only fields
+  zoning      String?
+  titleStatus String?
+  price       Decimal    @db.Decimal(14, 2)
+  status      UnitStatus @default(AVAILABLE)
+  createdAt   DateTime   @default(now())
 
   reservations Reservation[]
   deals        Deal[]
@@ -210,9 +230,9 @@ model Lead {
   lastActivityAt    DateTime?
   createdAt         DateTime   @default(now())
 
-  activities   Activity[]
-  followUps    FollowUp[]
-  clients      Client[]
+  activities Activity[]
+  followUps  FollowUp[]
+  clients    Client[]
 
   @@unique([companyId, phone])
   @@index([companyId, ownerId])
@@ -310,8 +330,10 @@ model Deal {
   commissionRate Decimal      @db.Decimal(5, 2)
   status         DealStatus   @default(ACTIVE)
   signedAt       DateTime
+  cancelReason   String?
   createdAt      DateTime     @default(now())
 
+  plan         PaymentPlan?
   installments Installment[]
   payments     Payment[]
   documents    Document[]
@@ -319,6 +341,17 @@ model Deal {
 
   @@unique([companyId, contractNo])
   @@index([companyId, agentId])
+}
+
+model PaymentPlan {
+  id        String   @id @default(cuid())
+  dealId    String   @unique
+  deal      Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  type      PlanType
+  downPct   Decimal  @default(0) @db.Decimal(5, 2)
+  months    Int      @default(0)
+  bankName  String?
+  createdAt DateTime @default(now())
 }
 
 model Installment {
@@ -350,6 +383,11 @@ model Payment {
   confirmedBy   User?         @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id])
   confirmedAt   DateTime?
   rejectReason  String?
+  /// Set on a correcting entry: negative amount that cancels a confirmed payment.
+  reversalOfId  String?       @unique
+  reversalOf    Payment?      @relation("PaymentReversal", fields: [reversalOfId], references: [id])
+  reversedBy    Payment?      @relation("PaymentReversal")
+  voidReason    String?
   receiptNo     Int?
   receiptId     String?       @unique
   receipt       Document?     @relation(fields: [receiptId], references: [id])
@@ -383,13 +421,13 @@ model CommissionPayout {
 
 /// Monthly sales target per agent (month = first day of the month, Addis time).
 model SalesTarget {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   companyId String
-  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company   Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   month     String
-  amount    Decimal  @db.Decimal(14, 2)
+  amount    Decimal @db.Decimal(14, 2)
 
   @@unique([userId, month])
   @@index([companyId, month])
@@ -428,7 +466,10 @@ model AuditLog {
   entity    String
   entityId  String?
   detail    String?
+  before    Json?
+  after     Json?
   createdAt DateTime @default(now())
 
   @@index([companyId, createdAt])
+  @@index([companyId, entity, entityId])
 }
