@@ -6,9 +6,9 @@ import { requireSession } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { back, num, str } from "@/lib/actions-util";
 import { RuleError } from "@/lib/rules";
-import { canManage, seesAll, SALES, MANAGERS } from "@/lib/permissions";
+import { canManage, seesAll, SALES, MANAGERS, ACCOUNTS } from "@/lib/permissions";
 import { addDays } from "@/lib/format";
-import { expireReservations, reserveUnit } from "@/lib/reservations";
+import { cancelReservation as cancelReservationRule, confirmDeposit, expireReservations, reserveUnit } from "@/lib/reservations";
 
 export async function createReservation(fd: FormData) {
   const s = await requireSession(SALES);
@@ -46,13 +46,26 @@ async function loadActive(fd: FormData) {
 }
 
 export async function cancelReservation(fd: FormData) {
-  const { s, r } = await loadActive(fd);
-  await db.$transaction([
-    db.reservation.update({ where: { id: r.id }, data: { status: "CANCELLED", closedAt: new Date(), note: str(fd, "reason") || r.note } }),
-    db.unit.updateMany({ where: { id: r.unitId, status: "RESERVED" }, data: { status: "AVAILABLE" } }),
-  ]);
-  await audit(s, "reservation.cancelled", "Reservation", r.id, `${r.unit.code} ${str(fd, "reason")}`);
-  back("/reservations", { msg: `Reservation for ${r.unit.code} cancelled; unit is available again` });
+  const s = await requireSession(SALES);
+  let code = "";
+  try {
+    code = (await cancelReservationRule(s, str(fd, "id"), str(fd, "reason"))).unit.code;
+  } catch (e) {
+    if (e instanceof RuleError) back("/reservations", { error: e.message });
+    throw e;
+  }
+  back("/reservations", { msg: `Reservation for ${code} cancelled; unit is available again` });
+}
+
+export async function confirmDepositAction(fd: FormData) {
+  const s = await requireSession(ACCOUNTS);
+  try {
+    await confirmDeposit(s, str(fd, "id"), str(fd, "reference"));
+  } catch (e) {
+    if (e instanceof RuleError) back("/payments", { error: e.message });
+    throw e;
+  }
+  back("/payments", { msg: "Deposit confirmed. The unit stays held even after the reservation date passes." });
 }
 
 export async function extendReservation(fd: FormData) {

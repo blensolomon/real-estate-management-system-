@@ -2,7 +2,7 @@ import Link from "next/link";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { canManage, seesAll } from "@/lib/permissions";
-import { expireReservations } from "@/lib/reservations";
+import { expireReservations, isHeld } from "@/lib/reservations";
 import { loadCollections } from "@/lib/collections";
 import { round } from "@/lib/finance";
 import { addDays, daysBetween, fmtDate, money } from "@/lib/format";
@@ -118,7 +118,7 @@ export default async function DashboardPage({ searchParams }: { searchParams: Pr
                 <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-amber-500" aria-hidden />
                 <div className="min-w-0 flex-1">
                   <div className="font-medium">{r.client.fullName} · {r.unit.code}</div>
-                  <div className="text-sm text-amber-700">{t("Reservation ends in {h} hours", { h: hours })}</div>
+                  <div className="text-sm text-amber-700">{isHeld(r, now) ? t("Reservation ended, deposit held: extend, sell or cancel") : t("Reservation ends in {h} hours", { h: hours })}</div>
                   <div className="text-xs text-slate-500">{r.agent.name}</div>
                 </div>
                 <div className="flex w-full flex-wrap gap-1 pl-4 sm:w-auto sm:pl-0">

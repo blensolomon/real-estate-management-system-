@@ -4,11 +4,12 @@ import { RuleError, isUniqueViolation, type Actor } from "./rules";
 import { canManage, seesAll } from "./permissions";
 import { audit } from "./audit";
 
-/** Expires overdue reservations and frees their units. Safe to call often. */
+/** Expires overdue reservations without a confirmed deposit and frees their units. Safe to call often. */
 export async function expireReservations(companyId?: string) {
   const now = new Date();
   const due = await db.reservation.findMany({
-    where: { status: "ACTIVE", expiresAt: { lt: now }, ...(companyId ? { companyId } : {}) },
+    // A confirmed deposit keeps the unit held after expiry until a manager extends, converts or cancels.
+    where: { status: "ACTIVE", expiresAt: { lt: now }, depositConfirmedAt: null, ...(companyId ? { companyId } : {}) },
     select: { id: true, unitId: true, companyId: true },
   });
   for (const r of due) {
@@ -82,4 +83,36 @@ export async function reserveUnit(actor: Actor, input: ReserveInput) {
     if (isUniqueViolation(e)) throw new RuleError(`Unit ${unit.code} is no longer available. It was reserved or sold by someone else.`);
     throw e;
   }
+}
+
+export const isHeld = (r: { status: string; expiresAt: Date; depositConfirmedAt: Date | null }, now = new Date()) =>
+  r.status === "ACTIVE" && !!r.depositConfirmedAt && r.expiresAt < now;
+
+/** Accountant confirms the reservation deposit against the bank record. */
+export async function confirmDeposit(actor: Actor, reservationId: string, reference: string) {
+  if (actor.role !== "ACCOUNTANT" && actor.role !== "OWNER") throw new RuleError("Only the accountant can confirm deposits");
+  const r = await db.reservation.findFirst({ where: { id: reservationId, companyId: actor.companyId, status: "ACTIVE" }, include: { unit: true } });
+  if (!r) throw new RuleError("Active reservation not found");
+  if (!(Number(r.depositAmount) > 0)) throw new RuleError("This reservation has no deposit");
+  if (r.depositConfirmedAt) throw new RuleError("Deposit already confirmed");
+  if (!reference.trim()) throw new RuleError("Enter the bank / Telebirr reference");
+  return db.$transaction(async (tx) => {
+    const n = await tx.reservation.updateMany({ where: { id: r.id, status: "ACTIVE", depositConfirmedAt: null }, data: { depositConfirmedAt: new Date(), depositConfirmedById: actor.userId, depositRef: reference.trim() } });
+    if (n.count !== 1) throw new RuleError("Deposit already confirmed");
+    await audit(actor, "reservation.deposit_confirmed", "Reservation", r.id, `${r.unit.code} · ${r.depositAmount} · ${reference.trim()}`, { after: { depositAmount: Number(r.depositAmount), reference: reference.trim() } }, tx);
+  });
+}
+
+/** Cancels an active reservation. A confirmed deposit means only a manager can cancel, with a reason; refunds happen outside the system. */
+export async function cancelReservation(actor: Actor, reservationId: string, reason: string) {
+  const r = await db.reservation.findFirst({ where: { id: reservationId, companyId: actor.companyId, status: "ACTIVE" }, include: { unit: true } });
+  if (!r || (!seesAll(actor.role) && r.agentId !== actor.userId)) throw new RuleError("Active reservation not found");
+  if (r.depositConfirmedAt && !canManage(actor.role)) throw new RuleError("The deposit is confirmed; only the Sales Manager or Owner can cancel");
+  if (r.depositConfirmedAt && !reason.trim()) throw new RuleError("Give a reason (the deposit is confirmed)");
+  await db.$transaction(async (tx) => {
+    await tx.reservation.update({ where: { id: r.id }, data: { status: "CANCELLED", closedAt: new Date(), note: reason.trim() || r.note } });
+    await tx.unit.updateMany({ where: { id: r.unitId, status: "RESERVED" }, data: { status: "AVAILABLE" } });
+    await audit(actor, "reservation.cancelled", "Reservation", r.id, `${r.unit.code} ${reason}`, { before: { status: "ACTIVE", depositConfirmed: !!r.depositConfirmedAt }, after: { status: "CANCELLED" } }, tx);
+  });
+  return r;
 }

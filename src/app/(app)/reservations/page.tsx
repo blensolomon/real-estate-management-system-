@@ -5,7 +5,7 @@ import { requireSession } from "@/lib/session";
 import { SALES } from "@/lib/permissions";
 import { ExportButtons } from "@/components/ExportButtons";
 import { canManage, seesAll } from "@/lib/permissions";
-import { expireReservations } from "@/lib/reservations";
+import { expireReservations, isHeld } from "@/lib/reservations";
 import { fmtDate, money } from "@/lib/format";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -51,12 +51,12 @@ export default async function ReservationsPage({ searchParams }: { searchParams:
                     <td><div className="font-medium">{r.unit.code}</div><div className="text-xs text-slate-500">{r.unit.project.name} · {money(r.unit.price)}</div></td>
                     <td><Link href={`/clients/${r.clientId}`} className="link">{r.client.fullName}</Link><div className="text-xs text-slate-500">{r.client.phone}</div></td>
                     <td>{r.agent.name}</td>
-                    <td>{money(r.depositAmount)}</td>
+                    <td>{money(r.depositAmount)}{r.depositConfirmedAt ? <div className="text-xs text-emerald-700">Confirmed</div> : Number(r.depositAmount) > 0 ? <div className="text-xs text-amber-600">Not confirmed yet</div> : null}</td>
                     <td>
                       {fmtDate(r.expiresAt, s.calendar)}
                       {r.status === "ACTIVE" && (
                         <div className={`text-xs ${hoursLeft < 48 ? "font-medium text-rose-600" : "text-slate-500"}`}>
-                          {hoursLeft < 48 ? `${hoursLeft}h left` : `${Math.floor(hoursLeft / 24)} days left`}
+                          {isHeld(r) ? "Ended · deposit held, manager decides" : hoursLeft < 48 ? `${hoursLeft}h left` : `${Math.floor(hoursLeft / 24)} days left`}
                         </div>
                       )}
                     </td>

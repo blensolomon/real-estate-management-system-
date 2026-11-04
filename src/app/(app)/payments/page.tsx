@@ -10,6 +10,7 @@ import { sum } from "@/lib/finance";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { reviewPayment } from "../deals/actions";
+import { confirmDepositAction } from "../reservations/actions";
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string; q?: string }> }) {
   const s = await requireSession(FINANCE_VIEW);
@@ -25,9 +26,30 @@ export default async function PaymentsPage({ searchParams }: { searchParams: Pro
     take: 300,
   });
   const finance = canConfirmPayments(s.role);
+  const deposits = canConfirmPayments(s.role)
+    ? await db.reservation.findMany({ where: { companyId: s.companyId, status: "ACTIVE", depositAmount: { gt: 0 }, depositConfirmedAt: null }, include: { unit: true, client: true, agent: true }, orderBy: { createdAt: "asc" } })
+    : [];
   return (
     <div>
       <PageHeader title="Payments" sub="Payments recorded by agents wait here until the accountant checks the bank or Telebirr reference. Only confirmed payments count." actions={<ExportButtons report="payments" />} />
+      {deposits.length > 0 && (
+        <div className="card mb-6 p-0">
+          <h2 className="h2 px-5 pt-4">Reservation deposits to confirm</h2>
+          <p className="muted px-5">A confirmed deposit keeps the unit held after the reservation date until the Sales Manager decides. It counts toward the price if the buyer purchases.</p>
+          <ul className="divide-y divide-slate-100">
+            {deposits.map((r) => (
+              <li key={r.id} className="flex flex-wrap items-center gap-2 px-5 py-3 text-sm">
+                <div className="min-w-0 flex-1"><span className="font-medium">{money(r.depositAmount)}</span> · {r.client.fullName} · {r.unit.code} <span className="text-slate-500">· {r.agent.name} · until {fmtDate(r.expiresAt, s.calendar)}</span></div>
+                <form action={confirmDepositAction} className="flex gap-1">
+                  <input type="hidden" name="id" value={r.id} />
+                  <input name="reference" className="input w-32 py-1" placeholder="Bank / Telebirr ref" required />
+                  <SubmitButton className="btn btn-sm">Confirm deposit</SubmitButton>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <Flash msg={sp.msg} error={sp.error} />
 <form className="mb-4 flex flex-wrap gap-2 print:hidden">
         <input name="q" defaultValue={sp.q} placeholder="Search buyer, contract or reference" className="input max-w-xs" />
