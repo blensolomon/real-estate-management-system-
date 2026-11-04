@@ -2,6 +2,8 @@ import "server-only";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
+import { accountActive } from "./tenancy";
 import type { CalendarPref, Role } from "@prisma/client";
 
 export type Session = {
@@ -50,13 +52,16 @@ export async function deleteSession() {
   (await cookies()).delete(COOKIE);
 }
 
-export async function getSession() {
-  return decrypt((await cookies()).get(COOKIE)?.value);
-}
+/** Valid token AND user + company still active (checked against the database once per request). */
+export const getSession = cache(async (): Promise<Session | null> => {
+  const s = await decrypt((await cookies()).get(COOKIE)?.value);
+  if (!s || !(await accountActive(s.userId, s.companyId))) return null;
+  return s;
+});
 
 export async function requireSession(roles?: Role[]): Promise<Session> {
   const s = await getSession();
-  if (!s) redirect("/login");
+  if (!s) redirect("/api/auth/signout?inactive=1");
   if (roles && !roles.includes(s.role)) redirect("/dashboard?denied=1");
   return s;
 }

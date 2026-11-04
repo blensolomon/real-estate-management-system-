@@ -70,6 +70,13 @@ Reservations without a confirmed deposit are expired whenever relevant pages loa
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Optional S3-compatible storage (AWS S3, R2, MinIO). Leave `S3_BUCKET` empty to use local disk |
 | `TEST_DATABASE_URL` | Separate database for `npm run test:rules` |
 
+## Multiple companies (SaaS)
+
+- Every record carries a `companyId`; every query and server action is scoped to the signed-in user's company. Users belong to exactly one company (emails are unique platform-wide).
+- New companies sign up at `/register`, which creates an empty company and its first Owner. Set `SIGNUP_ENABLED=false` to close public sign-up.
+- Platform operators listed in `PLATFORM_ADMIN_EMAILS` get an "All companies (platform)" link (`/platform`): a list of companies with counts only (no tenant business data), plus Suspend (reason required, audited) and Reactivate.
+- Each request re-checks that the user and their company are still active, so suspending a company or deactivating a user signs them out immediately.
+
 ## Docker and backups
 
 ```bash

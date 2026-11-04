@@ -5,12 +5,15 @@ import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
 import { createSession, deleteSession } from "@/lib/session";
 import { back, str } from "@/lib/actions-util";
+import { RuleError } from "@/lib/rules";
+import { createCompanyWithOwner, signupEnabled } from "@/lib/tenancy";
 
 export async function login(fd: FormData) {
   const email = str(fd, "email").toLowerCase();
   const user = await db.user.findUnique({ where: { email }, include: { company: true } });
   if (!user || !user.active || !(await bcrypt.compare(str(fd, "password"), user.passwordHash)))
     back("/login", { error: "Invalid email or password" });
+  if (!user.company.active) back("/login", { error: "This company account is suspended. Contact support." });
   await createSession({
     userId: user.id,
     companyId: user.companyId,
@@ -24,21 +27,15 @@ export async function login(fd: FormData) {
 }
 
 export async function register(fd: FormData) {
-  const company = str(fd, "company");
-  const name = str(fd, "name");
-  const email = str(fd, "email").toLowerCase();
-  const password = str(fd, "password");
-  if (!company || !name || !email || password.length < 8)
-    back("/register", { error: "All fields are required; password must be at least 8 characters" });
-  if (await db.user.findUnique({ where: { email } })) back("/register", { error: "Email already registered" });
-  const c = await db.company.create({
-    data: {
-      name: company,
-      users: { create: { name, email, passwordHash: await bcrypt.hash(password, 10), role: "OWNER" } },
-    },
-    include: { users: true },
-  });
-  const u = c.users[0];
+  if (!signupEnabled()) back("/register", { error: "Sign-up is closed. Contact us to open a company account." });
+  let created;
+  try {
+    created = await createCompanyWithOwner({ company: str(fd, "company"), name: str(fd, "name"), email: str(fd, "email"), password: str(fd, "password") });
+  } catch (e) {
+    if (e instanceof RuleError) back("/register", { error: e.message });
+    throw e;
+  }
+  const { company: c, owner: u } = created;
   await createSession({ userId: u.id, companyId: c.id, role: u.role, name: u.name, companyName: c.name, calendar: c.calendar, locale: c.locale });
   redirect("/dashboard");
 }
