@@ -1,5 +1,8 @@
 "use server";
 
+import { RuleError } from "@/lib/rules";
+import { moveLeads } from "@/lib/leads";
+
 import bcrypt from "bcryptjs";
 import type { CalendarPref, Role } from "@prisma/client";
 import { db } from "@/lib/db";
@@ -17,12 +20,18 @@ export async function updateCompany(fd: FormData) {
   const calendar = str(fd, "calendar") as CalendarPref;
   const locale = str(fd, "locale") === "am" ? "am" : "en";
   const staleLeadDays = Math.min(30, Math.max(1, Math.floor(num(fd, "staleLeadDays")) || 3));
+  const discountApprovalPct = num(fd, "discountApprovalPct");
+  if (!(discountApprovalPct >= 0 && discountApprovalPct <= 50)) back("/settings", { error: "Discount limit must be 0–50%" });
+  const before = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
   const c = await db.company.update({
     where: { id: s.companyId },
-    data: { name: str(fd, "name") || undefined, reservationDays, followUpDays, calendar, locale, staleLeadDays },
+    data: { name: str(fd, "name") || undefined, reservationDays, followUpDays, calendar, locale, staleLeadDays, discountApprovalPct },
   });
   await createSession({ ...s, companyName: c.name, calendar: c.calendar, locale: c.locale });
-  await audit(s, "company.updated", "Company", c.id, `reservation ${reservationDays}d, follow-up ${followUpDays}d, ${calendar}`);
+  await audit(s, "company.updated", "Company", c.id, `reservation ${reservationDays}d, follow-up ${followUpDays}d, ${calendar}, discount limit ${discountApprovalPct}%`, {
+    before: { reservationDays: before.reservationDays, discountApprovalPct: Number(before.discountApprovalPct) },
+    after: { reservationDays, discountApprovalPct },
+  });
   back("/settings", { msg: "Settings saved" });
 }
 
@@ -56,4 +65,17 @@ export async function updateUser(fd: FormData) {
   }
   await audit(s, "user.updated", "User", u.id, `${u.name}: ${str(fd, "role")}`);
   back("/settings", { msg: "User updated" });
+}
+
+export async function moveLeadsAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  let msg = "";
+  try {
+    const r = await moveLeads(s, str(fd, "fromId"), str(fd, "toId"));
+    msg = `Moved ${r.count} open leads from ${r.from.name} to ${r.to.name}`;
+  } catch (e) {
+    if (e instanceof RuleError) back("/settings", { error: e.message });
+    throw e;
+  }
+  back("/settings", { msg });
 }

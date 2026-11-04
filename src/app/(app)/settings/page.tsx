@@ -7,7 +7,7 @@ import { LOCALES } from "@/i18n";
 import { label } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
-import { addUser, updateCompany, updateUser } from "./actions";
+import { addUser, moveLeadsAction, updateCompany, updateUser } from "./actions";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string }> }) {
   const s = await requireSession(ADMINS);
@@ -34,6 +34,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div><label className="lbl">Language</label><select name="locale" defaultValue={company.locale} className="input" disabled={!admin}>{LOCALES.map((l) => <option key={l.value} value={l.value}>{l.label}</option>)}</select></div>
         <div><label className="lbl">Flag leads with no contact after (days)</label><input name="staleLeadDays" type="number" min={1} max={30} defaultValue={company.staleLeadDays} className="input" disabled={!admin} /></div>
         <div><label className="lbl">Follow-up after site visit (days)</label><input name="followUpDays" type="number" defaultValue={company.followUpDays} className="input" disabled={!admin} /></div>
+        <div><label className="lbl">Price below list needing approval (%)</label><input name="discountApprovalPct" type="number" step="0.5" min={0} max={50} defaultValue={Number(company.discountApprovalPct)} className="input" disabled={!admin} /><p className="mt-1 text-xs text-slate-500">Sales by agents priced lower than this go to the Sales Manager or Owner first.</p></div>
         {admin && <div className="md:col-span-2"><SubmitButton>Save settings</SubmitButton></div>}
       </form>
 
@@ -65,6 +66,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         </table>
       </div>
 
+      {admin && (
+        <form action={moveLeadsAction} className="card mb-6 grid max-w-3xl gap-3 md:grid-cols-3">
+          <div className="md:col-span-3"><h2 className="h2">Move open leads to another agent</h2><p className="muted">Leads stay with the agent who registered them. Use this when an agent leaves; every move is in the audit log.</p></div>
+          <select name="fromId" className="input" required>{users.map((u) => <option key={u.id} value={u.id}>From: {u.name}</option>)}</select>
+          <select name="toId" className="input" required>{users.filter((u) => u.active).map((u) => <option key={u.id} value={u.id}>To: {u.name}</option>)}</select>
+          <SubmitButton className="btn-secondary" confirm="Move all open leads?">Move leads</SubmitButton>
+        </form>
+      )}
       <form action={addUser} className="card grid max-w-3xl gap-3 md:grid-cols-3">
         <div className="md:col-span-3"><h2 className="h2">Add team member</h2></div>
         <div><label className="lbl">Name</label><input name="name" className="input" required /></div>

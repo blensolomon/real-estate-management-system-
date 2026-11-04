@@ -1,5 +1,8 @@
 "use server";
 
+import { RuleError } from "@/lib/rules";
+import { assignLeadOwner } from "@/lib/leads";
+
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActivityType, LeadSource, LeadStatus } from "@prisma/client";
@@ -112,18 +115,15 @@ export async function changeStatus(fd: FormData) {
 
 export async function reassignLead(fd: FormData) {
   const s = await requireSession(MANAGERS);
-  const lead = await loadLead(s, str(fd, "leadId"));
-  const to = await db.user.findFirst({ where: { id: str(fd, "ownerId"), companyId: s.companyId, active: true } });
-  if (!to) back(`/leads/${lead.id}`, { error: "Choose an active user" });
-  await db.$transaction([
-    db.lead.update({ where: { id: lead.id }, data: { ownerId: to.id } }),
-    db.followUp.updateMany({ where: { leadId: lead.id, doneAt: null }, data: { assigneeId: to.id } }),
-    db.activity.create({
-      data: { companyId: s.companyId, leadId: lead.id, userId: s.userId, type: "REASSIGNED", note: `Reassigned to ${to.name}` },
-    }),
-  ]);
-  await audit(s, "lead.reassigned", "Lead", lead.id, `to ${to.name}`);
-  back(`/leads/${lead.id}`, { msg: `Reassigned to ${to.name}` });
+  const leadId = str(fd, "leadId");
+  let name = "";
+  try {
+    name = (await assignLeadOwner(s, leadId, str(fd, "ownerId"))).name;
+  } catch (e) {
+    if (e instanceof RuleError) back(`/leads/${leadId}`, { error: e.message });
+    throw e;
+  }
+  back(`/leads/${leadId}`, { msg: `Lead now belongs to ${name}` });
 }
 
 export async function scheduleFollowUp(fd: FormData) {

@@ -126,14 +126,15 @@ export default async function LeadPage({
             <SubmitButton className="btn-secondary w-full">Update status</SubmitButton>
           </form>
 
-          {canManage(s.role) && (
+          {(s.role === "OWNER" || (s.role === "MANAGER" && !lead.ownerId)) && (
             <form action={reassignLead} className="card space-y-2">
-              <h2 className="h2">Reassign</h2>
+              <h2 className="h2">{lead.ownerId ? "Move to another agent" : "Assign to an agent"}</h2>
+              <p className="muted">{lead.ownerId ? "Leads stay with the agent who registered them. Moving is recorded in the audit log." : "This lead has no owner yet."}</p>
               <input type="hidden" name="leadId" value={lead.id} />
               <select name="ownerId" defaultValue={lead.ownerId ?? ""} className="input">
                 {users.map((u) => <option key={u.id} value={u.id}>{u.name} ({u.role.toLowerCase()})</option>)}
               </select>
-              <SubmitButton className="btn-secondary w-full">Reassign lead</SubmitButton>
+              <SubmitButton className="btn-secondary w-full">{lead.ownerId ? "Move lead" : "Assign lead"}</SubmitButton>
             </form>
           )}
 
