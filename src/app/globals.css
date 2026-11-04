@@ -1,26 +1,21 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+@layer components {
+  .card { @apply rounded-xl border border-slate-200 bg-white p-5 shadow-sm; }
+  .btn { @apply inline-flex items-center justify-center gap-1 rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50 cursor-pointer; }
+  .btn-secondary { @apply inline-flex items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 cursor-pointer; }
+  .btn-danger { @apply inline-flex items-center justify-center gap-1 rounded-lg bg-rose-600 px-3 py-2 text-sm font-medium text-white hover:bg-rose-700 cursor-pointer; }
+  .btn-sm { @apply px-2 py-1 text-xs; }
+  .input { @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm focus:border-emerald-600 focus:outline-none focus:ring-1 focus:ring-emerald-600; }
+  .lbl { @apply mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500; }
+  .tbl { @apply w-full text-left text-sm; }
+  .tbl th { @apply border-b border-slate-200 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-500; }
+  .tbl td { @apply border-b border-slate-100 px-3 py-2 align-top; }
+  .tbl tr:hover td { @apply bg-slate-50; }
+  .h1 { @apply text-2xl font-semibold text-slate-900; }
+  .h2 { @apply text-lg font-semibold text-slate-800; }
+  .muted { @apply text-sm text-slate-500; }
+  .link { @apply text-emerald-700 hover:underline; }
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
-}
+body { @apply bg-slate-50 text-slate-800; }

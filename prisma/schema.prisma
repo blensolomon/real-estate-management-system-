@@ -1,0 +1,401 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  OWNER
+  MANAGER
+  AGENT
+  FINANCE
+}
+
+enum CalendarPref {
+  ETHIOPIAN
+  GREGORIAN
+}
+
+enum LeadSource {
+  FACEBOOK
+  TELEGRAM
+  WALK_IN
+  REFERRAL
+  WEBSITE
+  TIKTOK
+  PHONE
+  OTHER
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  SITE_VISIT
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum ActivityType {
+  CALL
+  MEETING
+  SITE_VISIT
+  TELEGRAM
+  NOTE
+  STATUS_CHANGE
+  REASSIGNED
+}
+
+enum UnitStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  BLOCKED
+}
+
+enum ReservationStatus {
+  ACTIVE
+  EXPIRED
+  CANCELLED
+  CONVERTED
+}
+
+enum DealStatus {
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CASH
+  TELEBIRR
+  CBE_BIRR
+  CHEQUE
+  OTHER
+}
+
+enum PaymentStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
+}
+
+enum DocumentType {
+  CONTRACT
+  ID
+  RECEIPT
+  OTHER
+}
+
+model Company {
+  id              String       @id @default(cuid())
+  name            String
+  reservationDays Int          @default(7)
+  followUpDays    Int          @default(2)
+  calendar        CalendarPref @default(ETHIOPIAN)
+  createdAt       DateTime     @default(now())
+
+  users        User[]
+  projects     Project[]
+  units        Unit[]
+  leads        Lead[]
+  clients      Client[]
+  reservations Reservation[]
+  deals        Deal[]
+  payments     Payment[]
+  documents    Document[]
+  payouts      CommissionPayout[]
+  auditLogs    AuditLog[]
+  followUps    FollowUp[]
+  activities   Activity[]
+}
+
+model User {
+  id           String   @id @default(cuid())
+  companyId    String
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name         String
+  email        String   @unique
+  phone        String?
+  passwordHash String
+  role         Role     @default(AGENT)
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  leads             Lead[]             @relation("LeadOwner")
+  activities        Activity[]
+  followUps         FollowUp[]
+  reservations      Reservation[]
+  deals             Deal[]
+  paymentsRecorded  Payment[]          @relation("PaymentRecordedBy")
+  paymentsConfirmed Payment[]          @relation("PaymentConfirmedBy")
+  documents         Document[]
+  payouts           CommissionPayout[] @relation("PayoutAgent")
+  payoutsMade       CommissionPayout[] @relation("PayoutPaidBy")
+  auditLogs         AuditLog[]
+
+  @@index([companyId])
+}
+
+model Project {
+  id             String   @id @default(cuid())
+  companyId      String
+  company        Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name           String
+  location       String?
+  commissionRate Decimal  @default(2) @db.Decimal(5, 2)
+  createdAt      DateTime @default(now())
+
+  units Unit[]
+  leads Lead[]
+
+  @@index([companyId])
+}
+
+model Unit {
+  id        String     @id @default(cuid())
+  companyId String
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId String
+  project   Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code      String
+  block     String?
+  floor     Int?
+  type      String?
+  sizeSqm   Decimal?   @db.Decimal(10, 2)
+  price     Decimal    @db.Decimal(14, 2)
+  status    UnitStatus @default(AVAILABLE)
+  createdAt DateTime   @default(now())
+
+  reservations Reservation[]
+  deals        Deal[]
+
+  @@unique([projectId, code])
+  @@index([companyId, status])
+}
+
+model Lead {
+  id                String     @id @default(cuid())
+  companyId         String
+  company           Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name              String
+  phone             String
+  email             String?
+  source            LeadSource
+  sourceDetail      String?
+  status            LeadStatus @default(NEW)
+  budget            Decimal?   @db.Decimal(14, 2)
+  notes             String?
+  ownerId           String?
+  owner             User?      @relation("LeadOwner", fields: [ownerId], references: [id])
+  interestProjectId String?
+  interestProject   Project?   @relation(fields: [interestProjectId], references: [id])
+  lastActivityAt    DateTime?
+  createdAt         DateTime   @default(now())
+
+  activities   Activity[]
+  followUps    FollowUp[]
+  clients      Client[]
+
+  @@unique([companyId, phone])
+  @@index([companyId, ownerId])
+  @@index([companyId, status])
+}
+
+model Activity {
+  id        String       @id @default(cuid())
+  companyId String
+  company   Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId    String
+  lead      Lead         @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  type      ActivityType
+  note      String?
+  createdAt DateTime     @default(now())
+
+  @@index([leadId, createdAt])
+}
+
+model FollowUp {
+  id         String    @id @default(cuid())
+  companyId  String
+  company    Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  leadId     String
+  lead       Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  assigneeId String
+  assignee   User      @relation(fields: [assigneeId], references: [id])
+  dueAt      DateTime
+  note       String?
+  doneAt     DateTime?
+  outcome    String?
+  createdAt  DateTime  @default(now())
+
+  @@index([companyId, assigneeId, doneAt])
+}
+
+model Client {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fullName  String
+  phone     String
+  email     String?
+  idNumber  String?
+  address   String?
+  leadId    String?
+  lead      Lead?    @relation(fields: [leadId], references: [id])
+  createdAt DateTime @default(now())
+
+  reservations Reservation[]
+  deals        Deal[]
+  documents    Document[]
+
+  @@unique([companyId, phone])
+}
+
+model Reservation {
+  id            String            @id @default(cuid())
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  unitId        String
+  unit          Unit              @relation(fields: [unitId], references: [id])
+  clientId      String
+  client        Client            @relation(fields: [clientId], references: [id])
+  agentId       String
+  agent         User              @relation(fields: [agentId], references: [id])
+  depositAmount Decimal           @default(0) @db.Decimal(14, 2)
+  expiresAt     DateTime
+  status        ReservationStatus @default(ACTIVE)
+  note          String?
+  createdAt     DateTime          @default(now())
+  closedAt      DateTime?
+
+  deal Deal?
+
+  @@index([companyId, status, expiresAt])
+}
+
+model Deal {
+  id             String       @id @default(cuid())
+  companyId      String
+  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contractNo     String
+  unitId         String
+  unit           Unit         @relation(fields: [unitId], references: [id])
+  clientId       String
+  client         Client       @relation(fields: [clientId], references: [id])
+  agentId        String
+  agent          User         @relation(fields: [agentId], references: [id])
+  reservationId  String?      @unique
+  reservation    Reservation? @relation(fields: [reservationId], references: [id])
+  price          Decimal      @db.Decimal(14, 2)
+  commissionRate Decimal      @db.Decimal(5, 2)
+  status         DealStatus   @default(ACTIVE)
+  signedAt       DateTime
+  createdAt      DateTime     @default(now())
+
+  installments Installment[]
+  payments     Payment[]
+  documents    Document[]
+  payouts      CommissionPayout[]
+
+  @@unique([companyId, contractNo])
+  @@index([companyId, agentId])
+}
+
+model Installment {
+  id      String   @id @default(cuid())
+  dealId  String
+  deal    Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  seq     Int
+  label   String
+  dueDate DateTime
+  amount  Decimal  @db.Decimal(14, 2)
+
+  @@unique([dealId, seq])
+}
+
+model Payment {
+  id            String        @id @default(cuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId        String
+  deal          Deal          @relation(fields: [dealId], references: [id])
+  amount        Decimal       @db.Decimal(14, 2)
+  paidAt        DateTime
+  method        PaymentMethod
+  reference     String?
+  status        PaymentStatus @default(PENDING)
+  recordedById  String
+  recordedBy    User          @relation("PaymentRecordedBy", fields: [recordedById], references: [id])
+  confirmedById String?
+  confirmedBy   User?         @relation("PaymentConfirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt   DateTime?
+  rejectReason  String?
+  receiptId     String?       @unique
+  receipt       Document?     @relation(fields: [receiptId], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([companyId, status])
+  @@index([dealId])
+}
+
+model CommissionPayout {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  agentId   String
+  agent     User     @relation("PayoutAgent", fields: [agentId], references: [id])
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id])
+  amount    Decimal  @db.Decimal(14, 2)
+  reference String?
+  paidById  String
+  paidBy    User     @relation("PayoutPaidBy", fields: [paidById], references: [id])
+  paidAt    DateTime @default(now())
+
+  @@index([companyId, agentId])
+}
+
+model Document {
+  id           String       @id @default(cuid())
+  companyId    String
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type         DocumentType
+  fileName     String
+  storagePath  String
+  mimeType     String
+  size         Int
+  clientId     String?
+  client       Client?      @relation(fields: [clientId], references: [id])
+  dealId       String?
+  deal         Deal?        @relation(fields: [dealId], references: [id])
+  uploadedById String
+  uploadedBy   User         @relation(fields: [uploadedById], references: [id])
+  createdAt    DateTime     @default(now())
+
+  payment Payment?
+
+  @@index([companyId, clientId])
+  @@index([companyId, dealId])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?
+  createdAt DateTime @default(now())
+
+  @@index([companyId, createdAt])
+}

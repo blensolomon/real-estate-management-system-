@@ -1,36 +1,46 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Real Estate Sales Management System
 
-## Getting Started
+Multi-company SaaS for real estate developers and brokerages (built for the Ethiopian market).
+It tracks leads, unit inventory, reservations, payment plans, collections, agents and commissions,
+so owners know who owes them money, who sold what, and which units are really available.
 
-First, run the development server:
+## Features
+
+| Problem | How it is solved |
+| --- | --- |
+| Collections | Deals carry an installment schedule. Payments recorded by agents stay **pending** until Finance confirms them (bank / Telebirr reference + receipt upload, duplicate-reference check). Confirmed payments are applied oldest-installment-first; the Collections page shows overdue amounts, days overdue and an aging report (1–30 / 31–60 / 61–90 / 90+). |
+| Agent control | Every lead has an owner; agents only see their own leads, reservations and deals. Activities are timestamped and immutable. Follow-ups are tracked with overdue flags; managers can reassign leads (logged). |
+| Commission disputes | Commission % is set per project and frozen on the deal. Commission is earned at signing but becomes **payable in proportion to confirmed buyer payments**. Payouts are recorded and per-agent statements are available. |
+| Double-selling | Unit status changes via conditional updates inside transactions, plus partial unique indexes (one active reservation and one live deal per unit). Reservations expire automatically after the company's hold period. |
+| Lead loss | Source tracking (Facebook, Telegram, TikTok, walk-in, referral…), unique phone per company, a follow-up created for every new lead and automatically after each site visit, and a list of open leads with no next step. |
+| Scattered documents | Contracts, IDs, receipts and other files are stored per client and deal (PDF/images, 10 MB). |
+| No visibility | Live owner dashboard: overdue, outstanding, pending confirmations, monthly collections, inventory, expiring reservations, overdue follow-ups, sales by agent, lead sources and pipeline. Full audit log. |
+
+**Ethiopian calendar:** all dates display in the Ethiopian calendar (switchable to Gregorian in Settings), and date inputs use Ethiopian day / month / year pickers. Conversion is in `src/lib/ethiopian.ts` with tests.
+
+**Roles:** Owner, Manager, Agent, Finance.
+
+## Stack
+
+Next.js 15 (App Router, server actions), TypeScript, PostgreSQL, Prisma, Tailwind CSS v4, JWT cookie sessions (jose + bcrypt).
+
+## Getting started
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+docker run -d --name resms-db -e POSTGRES_USER=resms -e POSTGRES_PASSWORD=resms -e POSTGRES_DB=resms -p 5432:5432 postgres:16
+cp .env.example .env          # then set AUTH_SECRET and CRON_SECRET for production
+npm install
+npx prisma migrate deploy
+npm run db:seed               # optional demo data
+npm run dev                   # http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Demo logins (password `password123`): `owner@demo.et`, `manager@demo.et`, `finance@demo.et`, `agent@demo.et`.
+New companies can sign up at `/register`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Reservations are expired whenever relevant pages load. For timely expiry in production, schedule:
+`curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/expire-reservations`.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Scripts
 
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+`npm run lint`, `npm run typecheck`, `npm test` (calendar and finance logic), `npm run build`.
