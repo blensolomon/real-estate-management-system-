@@ -40,7 +40,7 @@ so owners know who owes them money, who sold what, and which units are really av
 
 ## Stack
 
-Next.js 15 (App Router, server actions), TypeScript, PostgreSQL, Prisma, Tailwind CSS v4, JWT cookie sessions (jose + bcrypt).
+Next.js 15 (App Router, server actions), TypeScript, PostgreSQL, Prisma, Tailwind CSS v4, JWT cookie sessions (jose + bcrypt), pdf-lib (receipts/statements), S3-compatible storage (AWS SDK) with local-disk fallback.
 
 ## Getting started
 
@@ -59,6 +59,45 @@ New companies can sign up at `/register`.
 Reservations are expired whenever relevant pages load. For timely expiry in production, schedule:
 `curl -X POST -H "Authorization: Bearer $CRON_SECRET" https://<host>/api/cron/expire-reservations`.
 
+## Environment variables
+
+| Variable | Purpose |
+|---|---|
+| `DATABASE_URL` | PostgreSQL connection |
+| `AUTH_SECRET` | Session signing key (`openssl rand -base64 32`) |
+| `CRON_SECRET` | Bearer token for `/api/cron/expire-reservations` |
+| `UPLOAD_DIR` | Local folder for files when S3 is not configured |
+| `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Optional S3-compatible storage (AWS S3, R2, MinIO). Leave `S3_BUCKET` empty to use local disk |
+| `TEST_DATABASE_URL` | Separate database for `npm run test:rules` |
+
+## Docker and backups
+
+```bash
+cp .env.example .env    # set AUTH_SECRET, CRON_SECRET, POSTGRES_PASSWORD, optional S3_*
+docker compose up -d --build
+```
+
+This runs the app (migrations apply on start), PostgreSQL, and a `backup` service that writes `./backups/resms-YYYY-MM-DD.sql.gz` once a day and keeps 14 days (`BACKUP_KEEP_DAYS`). Restore: `gunzip -c backups/resms-<date>.sql.gz | docker compose exec -T db psql -U resms resms`.
+
+## Business rules enforced by the database
+
+- One active reservation and one live sale per unit (unique indexes); reserving flips the unit from Available in the same transaction.
+- Confirmed payments cannot be edited (trigger). Corrections are a linked negative **reversal** entry; pending mistakes are **voided** with a reason.
+- Payments, sales, installments, reservations, payment plans and commission payouts cannot be deleted; audit log rows cannot be changed or deleted.
+- Money is `DECIMAL(14,2)`. Timestamps are stored in UTC and shown in Addis Ababa time, in the Ethiopian or Gregorian calendar.
+
+## Manager guide (one page)
+
+- **Home** answers: how much we sold, how much we collected, who is late, which units are free, which agents/leads need attention. Tap an item in *Needs attention* to call, WhatsApp or Telegram the person, or mark it done.
+- **Units**: green = available, amber = reserved, blue = sold, purple = handed over. Tap a unit code to see its full history (sales, reservations, price changes).
+- **Reserve**: pick an available unit, enter the buyer's name and phone. The reservation ends automatically after the company's set number of days unless it becomes a sale.
+- **Make it a sale**: from a reservation, choose the plan: full cash, down payment + monthly installments, or down payment + bank loan. The schedule is created automatically.
+- **Payments**: agents record payments with the bank/Telebirr reference and a proof photo. They stay *pending* until the accountant confirms them; only confirmed money counts. Confirming issues a numbered receipt (PDF).
+- **Mistakes**: a pending payment can be voided with a reason. A confirmed payment can't be changed; the accountant records a reversal, and both entries stay in the history.
+- **Client statement**: on any sale, *Client statement (PDF)* shows the schedule, confirmed payments and balance.
+- **Who owes us money**: everyone with overdue installments, oldest first. Export to Excel or PDF from any report.
+- **Roles**: Owner sees everything; Sales Manager runs agents, leads and targets; agents and brokers see only their own leads, clients and commissions; the Accountant confirms payments and approves commissions; Admin manages users, projects and settings.
+
 ## Scripts
 
-`npm run lint`, `npm run typecheck`, `npm test` (calendar and finance logic), `npm run build`.
+`npm run lint`, `npm run typecheck`, `npm test` (calendar and finance logic), `npm run test:rules` (business rules against `TEST_DATABASE_URL`; run `npx prisma migrate deploy` on it first), `npm run test:e2e` (Playwright, phone + desktop, needs the seeded app on :3000), `npm run build`.

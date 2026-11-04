@@ -1,0 +1,40 @@
+# Production-like stack: app + PostgreSQL + daily backups.
+# Files go to S3-compatible storage when S3_* is set in .env; otherwise to the "uploads" volume.
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: resms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-resms}
+      POSTGRES_DB: resms
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resms"]
+      interval: 5s
+      retries: 10
+
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://resms:${POSTGRES_PASSWORD:-resms}@db:5432/resms?schema=public
+      UPLOAD_DIR: /data/uploads
+    volumes: [uploads:/data/uploads]
+    ports: ["3000:3000"]
+
+  backup:
+    image: postgres:16
+    restart: unless-stopped
+    depends_on: { db: { condition: service_healthy } }
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:-resms}
+      KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+    volumes: [./backups:/backups]
+    entrypoint: ["sh", "-c", "while true; do pg_dump -h db -U resms resms | gzip > /backups/resms-$$(date +%F).sql.gz; find /backups -name '*.sql.gz' -mtime +$$KEEP_DAYS -delete; sleep 86400; done"]
+
+volumes:
+  pgdata:
+  uploads:
