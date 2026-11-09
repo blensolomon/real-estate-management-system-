@@ -10,8 +10,10 @@ type Item = { href: string; label: string; icon: string; roles?: string[] };
 const SALES = ["OWNER", "MANAGER", "AGENT"];
 export const NAV_ITEMS: Item[] = [
   { href: "/dashboard", label: "Home", icon: "⌂" },
+  { href: "/my-day", label: "My day", icon: "☀", roles: SALES },
   { href: "/leads", label: "Leads", icon: "☺", roles: SALES },
-  { href: "/follow-ups", label: "Follow-ups", icon: "✓", roles: SALES },
+  { href: "/pipeline", label: "Pipeline", icon: "▥", roles: SALES },
+  { href: "/follow-ups", label: "Tasks & visits", icon: "✓", roles: SALES },
   { href: "/collections", label: "Who owes us money", icon: "!", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
   { href: "/inventory", label: "Units", icon: "▦" },
   { href: "/reservations", label: "Reservations", icon: "◷", roles: SALES },
@@ -19,6 +21,8 @@ export const NAV_ITEMS: Item[] = [
   { href: "/payments", label: "Payments", icon: "₿", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
   { href: "/commissions", label: "Commissions", icon: "%", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
   { href: "/clients", label: "Clients & files", icon: "▤", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
+  { href: "/team", label: "Sales team", icon: "♟", roles: ["OWNER", "MANAGER"] },
+  { href: "/inventory/overview", label: "Inventory overview", icon: "▧" },
   { href: "/targets", label: "Targets", icon: "◎", roles: ["OWNER", "MANAGER"] },
   { href: "/approvals", label: "Price approvals", icon: "✓", roles: ["OWNER", "MANAGER"] },
   { href: "/settings", label: "Settings", icon: "⚙", roles: ["OWNER", "ADMIN"] },
@@ -27,8 +31,8 @@ export const NAV_ITEMS: Item[] = [
 
 const BOTTOM: Record<string, string[]> = {
   OWNER: ["/dashboard", "/collections", "/inventory", "/leads"],
-  MANAGER: ["/dashboard", "/leads", "/follow-ups", "/inventory"],
-  AGENT: ["/dashboard", "/leads", "/follow-ups", "/inventory"],
+  MANAGER: ["/dashboard", "/pipeline", "/team", "/inventory"],
+  AGENT: ["/my-day", "/pipeline", "/leads", "/inventory"],
   ACCOUNTANT: ["/dashboard", "/payments", "/collections", "/commissions"],
   ADMIN: ["/dashboard", "/inventory", "/settings", "/audit"],
 };
