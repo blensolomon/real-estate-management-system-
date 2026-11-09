@@ -1,6 +1,6 @@
 import { db } from "./db";
 import { audit } from "./audit";
-import { buildPlanSchedule, type PlanInput } from "./finance";
+import { buildPlanSchedule, tierRate, type PlanInput } from "./finance";
 import { seesAll } from "./permissions";
 import { RuleError, isUniqueViolation, type Actor } from "./rules";
 import { checkPrice } from "./approvals";
@@ -26,7 +26,7 @@ export function validatePlan(price: number, plan: PlanInput) {
 export async function createSale(actor: Actor, input: SaleInput) {
   const r = await db.reservation.findFirst({
     where: { id: input.reservationId, companyId: actor.companyId, status: "ACTIVE" },
-    include: { unit: { include: { project: true } } },
+    include: { company: true, unit: { include: { project: { include: { commissionTiers: true } } } } },
   });
   if (!r) throw new RuleError("Active reservation not found (it may have expired)");
   if (!seesAll(actor.role) && r.agentId !== actor.userId) throw new RuleError("Not your reservation");
@@ -49,7 +49,8 @@ export async function createSale(actor: Actor, input: SaleInput) {
           agentId: r.agentId,
           reservationId: r.id,
           price: input.price,
-          commissionRate: r.unit.project.commissionRate,
+          commissionRate: tierRate(Number(r.unit.project.commissionRate), r.unit.project.commissionTiers, input.price),
+          commissionPayablePct: r.company.commissionPayablePct,
           signedAt: input.signedAt,
           plan: { create: { type: plan.type, downPct: plan.downPct, months: plan.months, bankName: plan.bankName || null } },
           installments: { create: buildPlanSchedule(input.price, plan, input.firstDue) },

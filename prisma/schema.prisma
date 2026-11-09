@@ -129,19 +129,21 @@ enum DocumentType {
 }
 
 model Company {
-  id                  String          @id @default(cuid())
-  name                String
-  reservationDays     Int             @default(7)
-  followUpDays        Int             @default(2)
-  calendar            CalendarPref    @default(ETHIOPIAN)
-  locale              String          @default("en")
-  staleLeadDays       Int             @default(3)
-  receiptSeq          Int             @default(0)
-  discountApprovalPct Decimal         @default(5) @db.Decimal(5, 2)
-  active              Boolean         @default(true)
-  suspendedAt         DateTime?
-  priceApprovals      PriceApproval[]
-  createdAt           DateTime        @default(now())
+  id                   String          @id @default(cuid())
+  name                 String
+  reservationDays      Int             @default(7)
+  followUpDays         Int             @default(2)
+  calendar             CalendarPref    @default(ETHIOPIAN)
+  locale               String          @default("en")
+  staleLeadDays        Int             @default(3)
+  receiptSeq           Int             @default(0)
+  discountApprovalPct  Decimal         @default(5) @db.Decimal(5, 2)
+  /// New sales: commission becomes payable in full once this % of the price is confirmed.
+  commissionPayablePct Decimal         @default(30) @db.Decimal(5, 2)
+  active               Boolean         @default(true)
+  suspendedAt          DateTime?
+  priceApprovals       PriceApproval[]
+  createdAt            DateTime        @default(now())
 
   users                User[]
   projects             Project[]
@@ -159,6 +161,8 @@ model Company {
   targets              SalesTarget[]
   notifications        Notification[]
   documentRequirements DocumentRequirement[]
+  commissionTiers      CommissionTier[]
+  commissionSplits     CommissionSplit[]
 }
 
 model User {
@@ -175,6 +179,7 @@ model User {
   createdAt    DateTime @default(now())
 
   leads              Lead[]             @relation("LeadOwner")
+  commissionSplits   CommissionSplit[]
   notifications      Notification[]
   activities         Activity[]
   followUps          FollowUp[]
@@ -204,9 +209,10 @@ model Project {
   commissionRate Decimal  @default(2) @db.Decimal(5, 2)
   createdAt      DateTime @default(now())
 
-  units     Unit[]
-  leads     Lead[]
-  followUps FollowUp[]
+  units           Unit[]
+  leads           Lead[]
+  commissionTiers CommissionTier[]
+  followUps       FollowUp[]
 
   @@index([companyId])
 }
@@ -350,30 +356,33 @@ model Reservation {
 }
 
 model Deal {
-  id             String       @id @default(cuid())
-  companyId      String
-  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  contractNo     String
-  unitId         String
-  unit           Unit         @relation(fields: [unitId], references: [id])
-  clientId       String
-  client         Client       @relation(fields: [clientId], references: [id])
-  agentId        String
-  agent          User         @relation(fields: [agentId], references: [id])
-  reservationId  String?      @unique
-  reservation    Reservation? @relation(fields: [reservationId], references: [id])
-  price          Decimal      @db.Decimal(14, 2)
-  commissionRate Decimal      @db.Decimal(5, 2)
-  status         DealStatus   @default(ACTIVE)
-  signedAt       DateTime
-  cancelReason   String?
-  createdAt      DateTime     @default(now())
+  id                   String       @id @default(cuid())
+  companyId            String
+  company              Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contractNo           String
+  unitId               String
+  unit                 Unit         @relation(fields: [unitId], references: [id])
+  clientId             String
+  client               Client       @relation(fields: [clientId], references: [id])
+  agentId              String
+  agent                User         @relation(fields: [agentId], references: [id])
+  reservationId        String?      @unique
+  reservation          Reservation? @relation(fields: [reservationId], references: [id])
+  price                Decimal      @db.Decimal(14, 2)
+  commissionRate       Decimal      @db.Decimal(5, 2)
+  /// Snapshot at sale time. Null = older sale: commission unlocks gradually with collections.
+  commissionPayablePct Decimal?     @db.Decimal(5, 2)
+  status               DealStatus   @default(ACTIVE)
+  signedAt             DateTime
+  cancelReason         String?
+  createdAt            DateTime     @default(now())
 
   plan         PaymentPlan?
   installments Installment[]
   payments     Payment[]
   documents    Document[]
   payouts      CommissionPayout[]
+  splits       CommissionSplit[]
 
   @@unique([companyId, contractNo])
   @@index([companyId, agentId])
@@ -567,4 +576,35 @@ model DocumentRequirement {
   createdAt DateTime     @default(now())
 
   @@unique([companyId, type])
+}
+
+/// Price-based commission rate for a project: the highest fromAmount <= sale price wins; below every tier the project rate applies.
+model CommissionTier {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromAmount Decimal  @db.Decimal(14, 2)
+  rate       Decimal  @db.Decimal(5, 2)
+  createdAt  DateTime @default(now())
+
+  @@unique([projectId, fromAmount])
+  @@index([companyId])
+}
+
+/// Share of a deal's commission per earner. No rows = 100% to the deal's agent.
+model CommissionSplit {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  sharePct  Decimal  @db.Decimal(5, 2)
+  createdAt DateTime @default(now())
+
+  @@unique([dealId, userId])
+  @@index([companyId])
 }

@@ -75,16 +75,25 @@ export type CommissionState = { total: number; accrued: number; paid: number; ap
 
 /** Commission is earned on signing but only becomes payable in proportion to confirmed collections. */
 export function commissionState(
-  deal: { price: unknown; commissionRate: unknown; status: string },
+  deal: { price: unknown; commissionRate: unknown; status: string; commissionPayablePct?: unknown },
   confirmed: number,
   payouts: (Pick<CommissionPayout, "amount"> & { status?: CommissionPayout["status"] })[],
+  sharePct = 100,
 ): CommissionState {
   const price = Number(deal.price);
-  const total = deal.status === "CANCELLED" ? 0 : round((price * Number(deal.commissionRate)) / 100);
-  const accrued = price > 0 ? round(total * Math.min(1, confirmed / price)) : 0;
+  const total = deal.status === "CANCELLED" ? 0 : round((price * Number(deal.commissionRate) * sharePct) / 10000);
+  const threshold = deal.commissionPayablePct == null ? null : Number(deal.commissionPayablePct);
+  // Older sales unlock gradually with collections; newer ones unlock in full once the threshold is confirmed.
+  const accrued = price <= 0 ? 0 : threshold == null ? round(total * Math.min(1, confirmed / price)) : confirmed * 100 + 0.001 >= threshold * price ? total : 0;
   const paid = sum(payouts.filter((p) => (p.status ?? "PAID") === "PAID").map((p) => Number(p.amount)));
   const approved = sum(payouts.filter((p) => p.status === "APPROVED").map((p) => Number(p.amount)));
   return { total, accrued, paid, approved, payable: round(Math.max(0, accrued - paid - approved)), locked: round(total - accrued) };
+}
+
+/** Rate for a sale price: the highest tier whose fromAmount <= price, else the project's base rate. */
+export function tierRate(baseRate: number, tiers: { fromAmount: unknown; rate: unknown }[], price: number) {
+  const hit = tiers.filter((t) => Number(t.fromAmount) <= price).sort((a, b) => Number(b.fromAmount) - Number(a.fromAmount))[0];
+  return hit ? Number(hit.rate) : baseRate;
 }
 
 /** Builds an installment schedule: down payment now, remainder split monthly. */
