@@ -88,6 +88,13 @@ enum PlanType {
   CASH
   INSTALLMENT
   MORTGAGE
+  MILESTONE
+}
+
+enum PenaltyStatus {
+  OPEN
+  WAIVED
+  COLLECTED
 }
 
 enum ReservationStatus {
@@ -129,36 +136,49 @@ enum DocumentType {
 }
 
 model Company {
-  id                  String          @id @default(cuid())
-  name                String
-  reservationDays     Int             @default(7)
-  followUpDays        Int             @default(2)
-  calendar            CalendarPref    @default(ETHIOPIAN)
-  locale              String          @default("en")
-  staleLeadDays       Int             @default(3)
-  receiptSeq          Int             @default(0)
-  discountApprovalPct Decimal         @default(5) @db.Decimal(5, 2)
-  active              Boolean         @default(true)
-  suspendedAt         DateTime?
-  priceApprovals      PriceApproval[]
-  createdAt           DateTime        @default(now())
+  id                   String          @id @default(cuid())
+  name                 String
+  reservationDays      Int             @default(7)
+  followUpDays         Int             @default(2)
+  calendar             CalendarPref    @default(ETHIOPIAN)
+  locale               String          @default("en")
+  staleLeadDays        Int             @default(3)
+  receiptSeq           Int             @default(0)
+  discountApprovalPct  Decimal         @default(5) @db.Decimal(5, 2)
+  /// New sales: commission becomes payable in full once this % of the price is confirmed.
+  commissionPayablePct Decimal         @default(30) @db.Decimal(5, 2)
+  /// Construction-stage dues become due this many days after the stage is marked reached.
+  milestoneDueDays     Int             @default(30)
+  /// Late penalties: off by default; simple % per month on the late amount after a grace period, optional cap (% of the installment).
+  penaltyEnabled       Boolean         @default(false)
+  penaltyGraceDays     Int             @default(7)
+  penaltyPctPerMonth   Decimal         @default(0) @db.Decimal(5, 2)
+  penaltyCapPct        Decimal?        @db.Decimal(5, 2)
+  active               Boolean         @default(true)
+  suspendedAt          DateTime?
+  priceApprovals       PriceApproval[]
+  createdAt            DateTime        @default(now())
 
-  users                User[]
-  projects             Project[]
-  units                Unit[]
-  leads                Lead[]
-  clients              Client[]
-  reservations         Reservation[]
-  deals                Deal[]
-  payments             Payment[]
-  documents            Document[]
-  payouts              CommissionPayout[]
-  auditLogs            AuditLog[]
-  followUps            FollowUp[]
-  activities           Activity[]
-  targets              SalesTarget[]
-  notifications        Notification[]
-  documentRequirements DocumentRequirement[]
+  users                  User[]
+  projects               Project[]
+  units                  Unit[]
+  leads                  Lead[]
+  clients                Client[]
+  reservations           Reservation[]
+  deals                  Deal[]
+  payments               Payment[]
+  documents              Document[]
+  payouts                CommissionPayout[]
+  auditLogs              AuditLog[]
+  followUps              FollowUp[]
+  activities             Activity[]
+  targets                SalesTarget[]
+  notifications          Notification[]
+  documentRequirements   DocumentRequirement[]
+  commissionTiers        CommissionTier[]
+  commissionSplits       CommissionSplit[]
+  constructionMilestones ConstructionMilestone[]
+  penalties              Penalty[]
 }
 
 model User {
@@ -175,6 +195,7 @@ model User {
   createdAt    DateTime @default(now())
 
   leads              Lead[]             @relation("LeadOwner")
+  commissionSplits   CommissionSplit[]
   notifications      Notification[]
   activities         Activity[]
   followUps          FollowUp[]
@@ -204,9 +225,11 @@ model Project {
   commissionRate Decimal  @default(2) @db.Decimal(5, 2)
   createdAt      DateTime @default(now())
 
-  units     Unit[]
-  leads     Lead[]
-  followUps FollowUp[]
+  units           Unit[]
+  leads           Lead[]
+  milestones      ConstructionMilestone[]
+  commissionTiers CommissionTier[]
+  followUps       FollowUp[]
 
   @@index([companyId])
 }
@@ -350,30 +373,34 @@ model Reservation {
 }
 
 model Deal {
-  id             String       @id @default(cuid())
-  companyId      String
-  company        Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  contractNo     String
-  unitId         String
-  unit           Unit         @relation(fields: [unitId], references: [id])
-  clientId       String
-  client         Client       @relation(fields: [clientId], references: [id])
-  agentId        String
-  agent          User         @relation(fields: [agentId], references: [id])
-  reservationId  String?      @unique
-  reservation    Reservation? @relation(fields: [reservationId], references: [id])
-  price          Decimal      @db.Decimal(14, 2)
-  commissionRate Decimal      @db.Decimal(5, 2)
-  status         DealStatus   @default(ACTIVE)
-  signedAt       DateTime
-  cancelReason   String?
-  createdAt      DateTime     @default(now())
+  id                   String       @id @default(cuid())
+  companyId            String
+  company              Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  contractNo           String
+  unitId               String
+  unit                 Unit         @relation(fields: [unitId], references: [id])
+  clientId             String
+  client               Client       @relation(fields: [clientId], references: [id])
+  agentId              String
+  agent                User         @relation(fields: [agentId], references: [id])
+  reservationId        String?      @unique
+  reservation          Reservation? @relation(fields: [reservationId], references: [id])
+  price                Decimal      @db.Decimal(14, 2)
+  commissionRate       Decimal      @db.Decimal(5, 2)
+  /// Snapshot at sale time. Null = older sale: commission unlocks gradually with collections.
+  commissionPayablePct Decimal?     @db.Decimal(5, 2)
+  status               DealStatus   @default(ACTIVE)
+  signedAt             DateTime
+  cancelReason         String?
+  createdAt            DateTime     @default(now())
 
   plan         PaymentPlan?
   installments Installment[]
   payments     Payment[]
   documents    Document[]
   payouts      CommissionPayout[]
+  penalties    Penalty[]
+  splits       CommissionSplit[]
 
   @@unique([companyId, contractNo])
   @@index([companyId, agentId])
@@ -391,13 +418,16 @@ model PaymentPlan {
 }
 
 model Installment {
-  id      String   @id @default(cuid())
-  dealId  String
-  deal    Deal     @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  seq     Int
-  label   String
-  dueDate DateTime
-  amount  Decimal  @db.Decimal(14, 2)
+  id          String                 @id @default(cuid())
+  dealId      String
+  deal        Deal                   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  seq         Int
+  label       String
+  dueDate     DateTime
+  amount      Decimal                @db.Decimal(14, 2)
+  milestoneId String?
+  milestone   ConstructionMilestone? @relation(fields: [milestoneId], references: [id])
+  penalties   Penalty[]
 
   @@unique([dealId, seq])
 }
@@ -567,4 +597,77 @@ model DocumentRequirement {
   createdAt DateTime     @default(now())
 
   @@unique([companyId, type])
+}
+
+/// Price-based commission rate for a project: the highest fromAmount <= sale price wins; below every tier the project rate applies.
+model CommissionTier {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId  String
+  project    Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  fromAmount Decimal  @db.Decimal(14, 2)
+  rate       Decimal  @db.Decimal(5, 2)
+  createdAt  DateTime @default(now())
+
+  @@unique([projectId, fromAmount])
+  @@index([companyId])
+}
+
+/// Share of a deal's commission per earner. No rows = 100% to the deal's agent.
+model CommissionSplit {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId    String
+  deal      Deal     @relation(fields: [dealId], references: [id])
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  sharePct  Decimal  @db.Decimal(5, 2)
+  createdAt DateTime @default(now())
+
+  @@unique([dealId, userId])
+  @@index([companyId])
+}
+
+/// A construction stage of a project. `pct` = share of the price left after the down payment.
+model ConstructionMilestone {
+  id           String        @id @default(cuid())
+  companyId    String
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  projectId    String
+  project      Project       @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  seq          Int
+  name         String
+  pct          Decimal       @db.Decimal(5, 2)
+  expectedAt   DateTime
+  reachedAt    DateTime?
+  reachedById  String?
+  createdAt    DateTime      @default(now())
+  installments Installment[]
+
+  @@unique([projectId, seq])
+  @@index([companyId])
+}
+
+/// One month of late penalty on one installment. Never deleted: waived (with reason) or collected.
+model Penalty {
+  id            String        @id @default(cuid())
+  companyId     String
+  company       Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  dealId        String
+  deal          Deal          @relation(fields: [dealId], references: [id])
+  installmentId String
+  installment   Installment   @relation(fields: [installmentId], references: [id])
+  monthNo       Int
+  amount        Decimal       @db.Decimal(14, 2)
+  status        PenaltyStatus @default(OPEN)
+  reason        String?
+  reference     String?
+  decidedById   String?
+  decidedAt     DateTime?
+  createdAt     DateTime      @default(now())
+
+  @@unique([installmentId, monthNo])
+  @@index([companyId, status])
 }

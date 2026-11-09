@@ -2,6 +2,7 @@ import { PrismaClient, type LeadSource, type PlanType } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { buildPlanSchedule } from "../src/lib/finance";
 import { monthOf } from "../src/lib/months";
+import { addDays } from "../src/lib/format";
 
 const db = new PrismaClient();
 const day = 86400000;
@@ -27,6 +28,13 @@ async function main() {
   let receiptNo = 0;
 
   const apartments = await db.project.create({ data: { companyId: company.id, name: "Bole Heights", location: "Bole, Addis Ababa", commissionRate: 2 } });
+  await db.constructionMilestone.createMany({
+    data: [
+      { companyId: company.id, projectId: apartments.id, seq: 1, name: "Foundation", pct: 30, expectedAt: addDays(new Date(), -20), reachedAt: addDays(new Date(), -20) },
+      { companyId: company.id, projectId: apartments.id, seq: 2, name: "Structure complete", pct: 40, expectedAt: addDays(new Date(), 120) },
+      { companyId: company.id, projectId: apartments.id, seq: 3, name: "Finishing & handover", pct: 30, expectedAt: addDays(new Date(), 300) },
+    ],
+  });
   const plots = await db.project.create({ data: { companyId: company.id, name: "Legetafo Plots", location: "Legetafo, Oromia", commissionRate: 3 } });
   const units = [];
   // 18 apartments: 3 floors x 6

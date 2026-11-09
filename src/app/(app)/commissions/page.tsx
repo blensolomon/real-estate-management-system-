@@ -18,7 +18,7 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
   const { agentFilter, rows } = await loadCommissions(s, sp);
   const agents = seesAll(s.role) ? await db.user.findMany({ where: { companyId: s.companyId, role: { in: ["AGENT", "MANAGER"] } }, orderBy: { name: "asc" } }) : [];
   const tot = rows.reduce((x, { c }) => ({ total: x.total + c.total, payable: x.payable + c.payable, approved: x.approved + c.approved, paid: x.paid + c.paid, locked: x.locked + c.locked }), { total: 0, payable: 0, approved: 0, paid: 0, locked: 0 });
-  const toPay = rows.flatMap(({ d }) => d.payouts.filter((p) => p.status === "APPROVED").map((p) => ({ p, d })));
+  const toPay = rows.flatMap(({ d, earner }) => d.payouts.filter((p) => p.status === "APPROVED" && p.agentId === earner.id).map((p) => ({ p, d, earner })));
   const accountant = canConfirmPayments(s.role);
   const returnTo = `/commissions${agentFilter && seesAll(s.role) ? `?agent=${agentFilter}` : ""}`;
 
@@ -26,7 +26,7 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
     <div>
       <PageHeader
         title={seesAll(s.role) ? t("Commissions") : t("My commissions")}
-        sub={t("Earned when a deal is signed. It unlocks as the buyer's payments are confirmed, then the accountant approves and pays it.")}
+        sub={t("Earned when a deal is signed. It becomes payable once enough of the buyer's payments are confirmed, then the accountant approves and pays it.")}
         actions={<ExportButtons report="commissions" />}
       />
       <Flash msg={sp.msg} error={sp.error} />
@@ -41,10 +41,10 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
         <div className="card mb-6 p-0">
           <h2 className="h2 px-4 pt-4">{t("Approved, waiting to be paid")}</h2>
           <ul className="divide-y divide-slate-100">
-            {toPay.map(({ p, d }) => (
+            {toPay.map(({ p, d, earner }) => (
               <li key={p.id} className="flex flex-wrap items-center gap-3 px-4 py-3 text-sm">
                 <div className="min-w-0 flex-1">
-                  <div className="font-medium">{d.agent.name} · <span className="text-amber-700">{money(p.amount)}</span></div>
+                  <div className="font-medium">{earner.name} · <span className="text-amber-700">{money(p.amount)}</span></div>
                   <div className="text-xs text-slate-500">{d.contractNo} · {t("approved by {name} on {date}", { name: p.approvedBy.name, date: fmtDate(p.approvedAt, s.calendar) })}</div>
                 </div>
                 {accountant && (
@@ -75,12 +75,12 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
           <table className="tbl">
             <thead><tr><th>{t("Deal")}</th><th>{t("Agent")}</th><th>{t("Signed")}</th><th>{t("Rate")}</th><th>{t("Earned")}</th><th>{t("Unlocked")}</th><th>{t("Approved")}</th><th>{t("Paid")}</th><th>{t("Ready to approve")}</th>{accountant && <th className="print:hidden"></th>}</tr></thead>
             <tbody>
-              {rows.map(({ d, c }) => (
-                <tr key={d.id} className={d.status === "CANCELLED" ? "opacity-50" : ""}>
-                  <td><Link href={`/deals/${d.id}`} className="link">{d.contractNo}</Link><div className="text-xs text-slate-500">{d.unit.project.name} {d.unit.code} · {d.client.fullName}</div></td>
-                  <td>{d.agent.name}{d.agent.external && <div className="text-xs text-slate-500">{t("External broker")}</div>}</td>
+              {rows.map(({ d, c, earner }) => (
+                <tr key={`${d.id}-${earner.id}`} className={d.status === "CANCELLED" ? "opacity-50" : ""}>
+                  <td>{seesAll(s.role) || d.agentId === s.userId ? <Link href={`/deals/${d.id}`} className="link">{d.contractNo}</Link> : d.contractNo}<div className="text-xs text-slate-500">{d.unit.project.name} {d.unit.code} · {d.client.fullName}</div></td>
+                  <td>{earner.name}{earner.sharePct < 100 && <span className="text-xs text-slate-500"> · {earner.sharePct}%</span>}{earner.external && <div className="text-xs text-slate-500">{t("External broker")}</div>}</td>
                   <td>{fmtDate(d.signedAt, s.calendar)}</td>
-                  <td>{Number(d.commissionRate)}%</td>
+                  <td>{Number(d.commissionRate)}%{d.commissionPayablePct != null && <div className="text-xs text-slate-500">{t("full after {pct}% paid", { pct: Number(d.commissionPayablePct) })}</div>}</td>
                   <td>{money(c.total)}</td>
                   <td>{money(c.accrued)}</td>
                   <td className={c.approved ? "text-amber-700" : ""}>{money(c.approved)}</td>
@@ -91,6 +91,7 @@ export default async function CommissionsPage({ searchParams }: { searchParams: 
                       {c.payable > 0 && (
                         <form action={approveCommission} className="flex gap-1">
                           <input type="hidden" name="dealId" value={d.id} />
+                          <input type="hidden" name="agentId" value={earner.id} />
                           <input type="hidden" name="returnTo" value={returnTo} />
                           <input name="amount" defaultValue={c.payable} className="input w-28 py-1" />
                           <SubmitButton className="btn btn-sm">{t("Approve")}</SubmitButton>

@@ -22,15 +22,17 @@ export async function updateCompany(fd: FormData) {
   const staleLeadDays = Math.min(30, Math.max(1, Math.floor(num(fd, "staleLeadDays")) || 3));
   const discountApprovalPct = num(fd, "discountApprovalPct");
   if (!(discountApprovalPct >= 0 && discountApprovalPct <= 50)) back("/settings", { error: "Discount limit must be 0–50%" });
+  const commissionPayablePct = num(fd, "commissionPayablePct");
+  if (!(commissionPayablePct >= 0 && commissionPayablePct <= 100)) back("/settings", { error: "Commission payable point must be 0–100%" });
   const before = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
   const c = await db.company.update({
     where: { id: s.companyId },
-    data: { name: str(fd, "name") || undefined, reservationDays, followUpDays, calendar, locale, staleLeadDays, discountApprovalPct },
+    data: { name: str(fd, "name") || undefined, reservationDays, followUpDays, calendar, locale, staleLeadDays, discountApprovalPct, commissionPayablePct },
   });
   await createSession({ ...s, companyName: c.name, calendar: c.calendar, locale: c.locale });
   await audit(s, "company.updated", "Company", c.id, `reservation ${reservationDays}d, follow-up ${followUpDays}d, ${calendar}, discount limit ${discountApprovalPct}%`, {
-    before: { reservationDays: before.reservationDays, discountApprovalPct: Number(before.discountApprovalPct) },
-    after: { reservationDays, discountApprovalPct },
+    before: { reservationDays: before.reservationDays, discountApprovalPct: Number(before.discountApprovalPct), commissionPayablePct: Number(before.commissionPayablePct) },
+    after: { reservationDays, discountApprovalPct, commissionPayablePct },
   });
   back("/settings", { msg: "Settings saved" });
 }
@@ -78,4 +80,27 @@ export async function moveLeadsAction(fd: FormData) {
     throw e;
   }
   back("/settings", { msg });
+}
+
+/** Owner only: late-penalty rule and construction-stage due days (money rules). */
+export async function savePenaltyRule(fd: FormData) {
+  const s = await requireSession(["OWNER"]);
+  const penaltyEnabled = str(fd, "penaltyEnabled") === "on";
+  const penaltyGraceDays = Math.floor(num(fd, "penaltyGraceDays"));
+  const penaltyPctPerMonth = num(fd, "penaltyPctPerMonth");
+  const capRaw = str(fd, "penaltyCapPct");
+  const penaltyCapPct = capRaw === "" ? null : Number(capRaw);
+  const milestoneDueDays = Math.floor(num(fd, "milestoneDueDays"));
+  if (!(penaltyGraceDays >= 0 && penaltyGraceDays <= 90)) back("/settings", { error: "Grace period must be 0–90 days" });
+  if (!(penaltyPctPerMonth >= 0 && penaltyPctPerMonth <= 10)) back("/settings", { error: "Penalty must be 0–10% per month" });
+  if (penaltyEnabled && !(penaltyPctPerMonth > 0)) back("/settings", { error: "Set a penalty % above 0 to switch penalties on" });
+  if (penaltyCapPct != null && !(penaltyCapPct > 0 && penaltyCapPct <= 100)) back("/settings", { error: "Cap must be 1–100% or empty" });
+  if (!(milestoneDueDays >= 0 && milestoneDueDays <= 180)) back("/settings", { error: "Stage payment days must be 0–180" });
+  const before = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
+  await db.company.update({ where: { id: s.companyId }, data: { penaltyEnabled, penaltyGraceDays, penaltyPctPerMonth, penaltyCapPct, milestoneDueDays } });
+  await audit(s, "penalty.rule.updated", "Company", s.companyId, `penalties ${penaltyEnabled ? "on" : "off"}, ${penaltyPctPerMonth}%/month after ${penaltyGraceDays}d, cap ${penaltyCapPct ?? "none"}; stage dues ${milestoneDueDays}d`, {
+    before: { penaltyEnabled: before.penaltyEnabled, penaltyGraceDays: before.penaltyGraceDays, penaltyPctPerMonth: Number(before.penaltyPctPerMonth), penaltyCapPct: before.penaltyCapPct == null ? null : Number(before.penaltyCapPct), milestoneDueDays: before.milestoneDueDays },
+    after: { penaltyEnabled, penaltyGraceDays, penaltyPctPerMonth, penaltyCapPct, milestoneDueDays },
+  });
+  back("/settings", { msg: "Payment rules saved" });
 }

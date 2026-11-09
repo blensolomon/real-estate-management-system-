@@ -5,10 +5,11 @@ import { requireSession } from "@/lib/session";
 import { ExportButtons } from "@/components/ExportButtons";
 import { canAdmin, seesAll } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
-import { fmtDate, money } from "@/lib/format";
+import { fmtDate, money, toDateInput } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
-import { addUnits, updateProject, updateUnit } from "../actions";
+import { addUnits, markReachedAction, saveMilestonesAction, saveTiersAction, updateProject, updateUnit } from "../actions";
+import { DateField } from "@/components/DateField";
 
 const TILE: Record<string, string> = {
   AVAILABLE: "border-emerald-300 bg-emerald-50",
@@ -44,6 +45,9 @@ export default async function ProjectPage({
   });
   if (!project) notFound();
   const manage = canAdmin(s.role);
+  const stages = await db.constructionMilestone.findMany({ where: { projectId: project.id, companyId: s.companyId }, orderBy: { seq: "asc" }, include: { _count: { select: { installments: true } } } });
+  const stagesInUse = stages.some((m) => m._count.installments > 0);
+  const tiers = manage ? await db.commissionTier.findMany({ where: { projectId: project.id, companyId: s.companyId }, orderBy: { fromAmount: "asc" } }) : [];
 
   return (
     <div>
@@ -120,6 +124,50 @@ export default async function ProjectPage({
             <div><label className="lbl">Commission %</label><input name="commissionRate" defaultValue={Number(project.commissionRate)} className="input" /></div>
             <div className="flex items-end"><SubmitButton className="btn-secondary">Save</SubmitButton></div>
           </form>
+          <form action={saveTiersAction} className="card space-y-2">
+            <h2 className="h2">Commission by sale price</h2>
+            <p className="muted">Optional. A sale at or above a starting price earns that tier&apos;s rate; below every tier the project rate applies. Only new sales use these.</p>
+            <input type="hidden" name="projectId" value={project.id} />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="grid grid-cols-2 gap-2">
+                <input name="fromAmount" defaultValue={tiers[i] ? Number(tiers[i].fromAmount) : ""} placeholder="From price ETB" inputMode="decimal" className="input" />
+                <input name="rate" defaultValue={tiers[i] ? Number(tiers[i].rate) : ""} placeholder="Rate %" inputMode="decimal" className="input" />
+              </div>
+            ))}
+            <SubmitButton className="btn-secondary">Save tiers</SubmitButton>
+          </form>
+          <div className="card space-y-2">
+            <h2 className="h2">Construction stages</h2>
+            <p className="muted">For &quot;pay by construction stage&quot; sales. Each stage&apos;s % is its share of the price left after the down payment. When you mark a stage reached, that payment is due 30 days later (change in Settings).</p>
+            {stagesInUse ? (
+              <ul className="space-y-2 text-sm">
+                {stages.map((m) => (
+                  <li key={m.id} className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2">
+                    <span>{m.seq}. {m.name} · {Number(m.pct)}%<span className="block text-xs text-slate-500">{m.reachedAt ? `Reached ${fmtDate(m.reachedAt, s.calendar)}` : `Expected ${fmtDate(m.expectedAt, s.calendar)}`}</span></span>
+                    {m.reachedAt ? <Badge>REACHED</Badge> : (
+                      <form action={markReachedAction}>
+                        <input type="hidden" name="projectId" value={project.id} /><input type="hidden" name="milestoneId" value={m.id} />
+                        <SubmitButton className="btn btn-sm" confirm={`Mark "${m.name}" reached? Client payments for it become due.`}>Mark reached</SubmitButton>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <form action={saveMilestonesAction} className="space-y-2">
+                <input type="hidden" name="projectId" value={project.id} />
+                {[0, 1, 2, 3, 4].map((i) => (
+                  <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    <input name="stageName" defaultValue={stages[i]?.name ?? ""} placeholder="Stage, e.g. Foundation" className="input" />
+                    <input name="pct" defaultValue={stages[i] ? Number(stages[i].pct) : ""} placeholder="%" inputMode="decimal" className="input" />
+                    <div className="col-span-2 sm:col-span-1"><DateField name="expectedAt" calendar={s.calendar} defaultValue={stages[i] ? toDateInput(stages[i].expectedAt) : ""} /></div>
+                  </div>
+                ))}
+                <p className="text-xs text-slate-500">Shares must add up to 100%. Stages lock once a sale uses them.</p>
+                <SubmitButton className="btn-secondary">Save stages</SubmitButton>
+              </form>
+            )}
+          </div>
         </div>
       )}
     </div>

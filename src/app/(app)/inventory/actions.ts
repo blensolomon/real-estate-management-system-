@@ -5,6 +5,10 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { ADMINS } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
+import { saveTiers } from "@/lib/commissions";
+import { markMilestoneReached, saveMilestones } from "@/lib/milestones";
+import { parseDateInput } from "@/lib/format";
+import { RuleError } from "@/lib/rules";
 import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
 
 export async function createProject(fd: FormData) {
@@ -99,4 +103,46 @@ export async function updateUnit(fd: FormData) {
     after: { price: newPrice, status, code: str(fd, "code") || unit.code, zoning: str(fd, "zoning") || null, titleStatus: str(fd, "titleStatus") || null },
   });
   back(path, { msg: `Unit ${unit.code} updated` });
+}
+
+export async function saveTiersAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  const projectId = str(fd, "projectId");
+  const toNum = (v: FormDataEntryValue) => Number(String(v).replace(/,/g, "").trim() || 0);
+  const rates = fd.getAll("rate").map(toNum);
+  const tiers = fd.getAll("fromAmount").map((v, i) => ({ fromAmount: toNum(v), rate: rates[i] || 0 }));
+  try {
+    await saveTiers(s, projectId, tiers);
+  } catch (e) {
+    if (e instanceof RuleError) back(`/inventory/${projectId}`, { error: e.message });
+    throw e;
+  }
+  back(`/inventory/${projectId}`, { msg: "Commission tiers saved. They apply to new sales." });
+}
+
+export async function saveMilestonesAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  const projectId = str(fd, "projectId");
+  const pcts = fd.getAll("pct").map((v) => Number(String(v).trim() || 0));
+  const dates = fd.getAll("expectedAt").map((v) => parseDateInput(String(v)));
+  const items = fd.getAll("stageName").map((v, i) => ({ name: String(v), pct: pcts[i] || 0, expectedAt: dates[i] ?? null }));
+  try {
+    await saveMilestones(s, projectId, items);
+  } catch (e) {
+    if (e instanceof RuleError) back(`/inventory/${projectId}`, { error: e.message });
+    throw e;
+  }
+  back(`/inventory/${projectId}`, { msg: "Construction stages saved" });
+}
+
+export async function markReachedAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  const projectId = str(fd, "projectId");
+  try {
+    const r = await markMilestoneReached(s, str(fd, "milestoneId"));
+    back(`/inventory/${projectId}`, { msg: `Stage marked reached. ${r.count} client payment(s) are now due.` });
+  } catch (e) {
+    if (e instanceof RuleError) back(`/inventory/${projectId}`, { error: e.message });
+    throw e;
+  }
 }

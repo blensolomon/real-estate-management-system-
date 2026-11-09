@@ -1,9 +1,10 @@
 import { db } from "./db";
 import { audit } from "./audit";
-import { buildPlanSchedule, type PlanInput } from "./finance";
+import { buildPlanSchedule, tierRate, type PlanInput } from "./finance";
 import { seesAll } from "./permissions";
 import { RuleError, isUniqueViolation, type Actor } from "./rules";
 import { checkPrice } from "./approvals";
+import { milestoneSchedule } from "./milestones";
 
 export type SaleInput = {
   reservationId: string;
@@ -16,7 +17,7 @@ export type SaleInput = {
 
 export function validatePlan(price: number, plan: PlanInput) {
   if (!(price > 0)) throw new RuleError("Enter the final price");
-  if (!["CASH", "INSTALLMENT", "MORTGAGE"].includes(plan.type)) throw new RuleError("Choose a payment plan");
+  if (!["CASH", "INSTALLMENT", "MORTGAGE", "MILESTONE"].includes(plan.type)) throw new RuleError("Choose a payment plan");
   if (plan.type !== "CASH" && !(plan.downPct >= 0 && plan.downPct <= 100)) throw new RuleError("Down payment must be 0–100%");
   if (plan.type === "INSTALLMENT" && !(Number.isInteger(plan.months) && plan.months >= 0 && plan.months <= 120)) throw new RuleError("Months must be 0–120");
   if (plan.type === "MORTGAGE" && !(Number.isInteger(plan.months) && plan.months >= 0 && plan.months <= 24)) throw new RuleError("Bank payout month must be 0–24");
@@ -26,13 +27,14 @@ export function validatePlan(price: number, plan: PlanInput) {
 export async function createSale(actor: Actor, input: SaleInput) {
   const r = await db.reservation.findFirst({
     where: { id: input.reservationId, companyId: actor.companyId, status: "ACTIVE" },
-    include: { unit: { include: { project: true } } },
+    include: { company: true, unit: { include: { project: { include: { commissionTiers: true, milestones: { orderBy: { seq: "asc" } } } } } } },
   });
   if (!r) throw new RuleError("Active reservation not found (it may have expired)");
   if (!seesAll(actor.role) && r.agentId !== actor.userId) throw new RuleError("Not your reservation");
   if (!input.contractNo.trim()) throw new RuleError("Enter the contract number");
   const plan = { ...input.plan, downPct: input.plan.type === "CASH" ? 100 : input.plan.downPct, months: input.plan.type === "CASH" ? 0 : input.plan.months };
   validatePlan(input.price, plan);
+  if (plan.type === "MILESTONE" && !r.unit.project.milestones.length) throw new RuleError("This project has no construction stages yet");
   const listPrice = Number(r.unit.price);
   const priceCheck = await checkPrice(actor, r.id, listPrice, input.price);
   try {
@@ -49,10 +51,13 @@ export async function createSale(actor: Actor, input: SaleInput) {
           agentId: r.agentId,
           reservationId: r.id,
           price: input.price,
-          commissionRate: r.unit.project.commissionRate,
+          commissionRate: tierRate(Number(r.unit.project.commissionRate), r.unit.project.commissionTiers, input.price),
+          commissionPayablePct: r.company.commissionPayablePct,
           signedAt: input.signedAt,
           plan: { create: { type: plan.type, downPct: plan.downPct, months: plan.months, bankName: plan.bankName || null } },
-          installments: { create: buildPlanSchedule(input.price, plan, input.firstDue) },
+          installments: {
+            create: plan.type === "MILESTONE" ? milestoneSchedule(input.price, plan.downPct, r.unit.project.milestones, input.firstDue, r.company.milestoneDueDays) : buildPlanSchedule(input.price, plan, input.firstDue),
+          },
         },
       });
       if (Number(r.depositAmount) > 0) {

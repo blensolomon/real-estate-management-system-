@@ -10,9 +10,10 @@ import { RuleError } from "@/lib/rules";
 import { NeedsApprovalError, requestPriceApproval } from "@/lib/approvals";
 import { createSale } from "@/lib/sales";
 import { confirmPayment, rejectPayment, reversePayment, voidPayment } from "@/lib/payments";
-import { seesAll, SALES, ACCOUNTS, FINANCE_VIEW } from "@/lib/permissions";
+import { seesAll, SALES, ACCOUNTS, FINANCE_VIEW, MANAGERS } from "@/lib/permissions";
+import { approveCommissionFor, setDealSplits } from "@/lib/commissions";
+import { decidePenalty } from "@/lib/penalties";
 import { parseDateInput } from "@/lib/format";
-import { commissionState, sum } from "@/lib/finance";
 import { saveDocument, validFile } from "@/lib/documents";
 
 export async function createDeal(fd: FormData) {
@@ -144,18 +145,26 @@ export async function uploadDealDocument(fd: FormData) {
 export async function approveCommission(fd: FormData) {
   const { s, deal } = await loadDeal(str(fd, "dealId"), ACCOUNTS);
   const returnTo = str(fd, "returnTo") || `/deals/${deal.id}`;
-  const amount = num(fd, "amount");
-  const [payments, payouts] = await Promise.all([
-    db.payment.findMany({ where: { dealId: deal.id, status: "CONFIRMED" } }),
-    db.commissionPayout.findMany({ where: { dealId: deal.id } }),
-  ]);
-  const c = commissionState(deal, sum(payments.map((p) => Number(p.amount))), payouts);
-  if (!(amount > 0) || amount > c.payable + 0.001) back(returnTo, { error: `Amount must be between 0 and the payable ${c.payable}` });
-  await db.commissionPayout.create({
-    data: { companyId: s.companyId, agentId: deal.agentId, dealId: deal.id, amount, approvedById: s.userId },
-  });
-  await audit(s, "commission.approved", "Deal", deal.id, `${amount}`);
+  try {
+    await approveCommissionFor(s, deal.id, str(fd, "agentId") || deal.agentId, num(fd, "amount"));
+  } catch (e) {
+    if (e instanceof RuleError) back(returnTo, { error: e.message });
+    throw e;
+  }
   back(returnTo, { msg: "Commission approved. Mark it paid once the money is sent." });
+}
+
+export async function saveSplits(fd: FormData) {
+  const { s, deal } = await loadDeal(str(fd, "dealId"), MANAGERS);
+  const pcts = fd.getAll("sharePct").map((v) => Number(String(v).trim() || 0));
+  const items = fd.getAll("userId").map((v, i) => ({ userId: String(v), sharePct: pcts[i] || 0 })).filter((i) => i.userId);
+  try {
+    await setDealSplits(s, deal.id, items);
+  } catch (e) {
+    if (e instanceof RuleError) back(`/deals/${deal.id}`, { error: e.message });
+    throw e;
+  }
+  back(`/deals/${deal.id}`, { msg: "Commission split saved" });
 }
 
 export async function markCommissionPaid(fd: FormData) {
@@ -178,4 +187,17 @@ export async function cancelDeal(fd: FormData) {
   ]);
   await audit(s, "deal.cancelled", "Deal", deal.id, reason, { before: { status: deal.status, unitStatus: deal.unit.status }, after: { status: "CANCELLED", unitStatus: "AVAILABLE" } });
   back(`/deals/${deal.id}`, { msg: "Deal cancelled; unit released" });
+}
+
+export async function decidePenaltyAction(fd: FormData) {
+  const s = await requireSession(ACCOUNTS);
+  const dealId = str(fd, "dealId");
+  const action = str(fd, "action") === "COLLECT" ? "COLLECT" : "WAIVE";
+  try {
+    await decidePenalty(s, str(fd, "penaltyId"), action, str(fd, "note"));
+  } catch (e) {
+    if (e instanceof RuleError) back(`/deals/${dealId}`, { error: e.message });
+    throw e;
+  }
+  back(`/deals/${dealId}`, { msg: action === "WAIVE" ? "Penalty waived" : "Penalty marked collected" });
 }
