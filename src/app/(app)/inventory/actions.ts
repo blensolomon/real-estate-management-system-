@@ -5,6 +5,8 @@ import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { ADMINS } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
+import { saveTiers } from "@/lib/commissions";
+import { RuleError } from "@/lib/rules";
 import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
 
 export async function createProject(fd: FormData) {
@@ -99,4 +101,19 @@ export async function updateUnit(fd: FormData) {
     after: { price: newPrice, status, code: str(fd, "code") || unit.code, zoning: str(fd, "zoning") || null, titleStatus: str(fd, "titleStatus") || null },
   });
   back(path, { msg: `Unit ${unit.code} updated` });
+}
+
+export async function saveTiersAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  const projectId = str(fd, "projectId");
+  const toNum = (v: FormDataEntryValue) => Number(String(v).replace(/,/g, "").trim() || 0);
+  const rates = fd.getAll("rate").map(toNum);
+  const tiers = fd.getAll("fromAmount").map((v, i) => ({ fromAmount: toNum(v), rate: rates[i] || 0 }));
+  try {
+    await saveTiers(s, projectId, tiers);
+  } catch (e) {
+    if (e instanceof RuleError) back(`/inventory/${projectId}`, { error: e.message });
+    throw e;
+  }
+  back(`/inventory/${projectId}`, { msg: "Commission tiers saved. They apply to new sales." });
 }

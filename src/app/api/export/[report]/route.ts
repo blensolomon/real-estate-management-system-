@@ -35,7 +35,7 @@ const REPORTS: Record<string, Report> = {
       const { rows } = await loadCommissions(s, Object.fromEntries(q));
       return {
         head: [t("Contract"), t("Agent"), t("External broker"), t("Signed"), t("Rate %"), t("Earned"), t("Unlocked"), t("Approved"), t("Paid"), t("Ready to approve"), t("Waiting for buyer payments")],
-        rows: rows.map(({ d, c }) => [d.contractNo, d.agent.name, d.agent.external ? t("Yes") : t("No"), fmtDate(d.signedAt, s.calendar), n(d.commissionRate), c.total, c.accrued, c.approved, c.paid, c.payable, c.locked]),
+        rows: rows.map(({ d, c, earner }) => [d.contractNo, earner.sharePct < 100 ? `${earner.name} (${earner.sharePct}%)` : earner.name, earner.external ? t("Yes") : t("No"), fmtDate(d.signedAt, s.calendar), n(d.commissionRate), c.total, c.accrued, c.approved, c.paid, c.payable, c.locked]),
       };
     },
   },

@@ -8,7 +8,7 @@ import { expireReservations } from "@/lib/reservations";
 import { fmtDate, money } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
-import { addUnits, updateProject, updateUnit } from "../actions";
+import { addUnits, saveTiersAction, updateProject, updateUnit } from "../actions";
 
 const TILE: Record<string, string> = {
   AVAILABLE: "border-emerald-300 bg-emerald-50",
@@ -44,6 +44,7 @@ export default async function ProjectPage({
   });
   if (!project) notFound();
   const manage = canAdmin(s.role);
+  const tiers = manage ? await db.commissionTier.findMany({ where: { projectId: project.id, companyId: s.companyId }, orderBy: { fromAmount: "asc" } }) : [];
 
   return (
     <div>
@@ -119,6 +120,18 @@ export default async function ProjectPage({
             <div><label className="lbl">Location</label><input name="location" defaultValue={project.location ?? ""} className="input" /></div>
             <div><label className="lbl">Commission %</label><input name="commissionRate" defaultValue={Number(project.commissionRate)} className="input" /></div>
             <div className="flex items-end"><SubmitButton className="btn-secondary">Save</SubmitButton></div>
+          </form>
+          <form action={saveTiersAction} className="card space-y-2">
+            <h2 className="h2">Commission by sale price</h2>
+            <p className="muted">Optional. A sale at or above a starting price earns that tier&apos;s rate; below every tier the project rate applies. Only new sales use these.</p>
+            <input type="hidden" name="projectId" value={project.id} />
+            {[0, 1, 2, 3].map((i) => (
+              <div key={i} className="grid grid-cols-2 gap-2">
+                <input name="fromAmount" defaultValue={tiers[i] ? Number(tiers[i].fromAmount) : ""} placeholder="From price ETB" inputMode="decimal" className="input" />
+                <input name="rate" defaultValue={tiers[i] ? Number(tiers[i].rate) : ""} placeholder="Rate %" inputMode="decimal" className="input" />
+              </div>
+            ))}
+            <SubmitButton className="btn-secondary">Save tiers</SubmitButton>
           </form>
         </div>
       )}

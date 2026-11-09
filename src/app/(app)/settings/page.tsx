@@ -38,6 +38,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div><label className="lbl">Flag leads with no contact after (days)</label><input name="staleLeadDays" type="number" min={1} max={30} defaultValue={company.staleLeadDays} className="input" disabled={!admin} /></div>
         <div><label className="lbl">Follow-up after site visit (days)</label><input name="followUpDays" type="number" defaultValue={company.followUpDays} className="input" disabled={!admin} /></div>
         <div><label className="lbl">Price below list needing approval (%)</label><input name="discountApprovalPct" type="number" step="0.5" min={0} max={50} defaultValue={Number(company.discountApprovalPct)} className="input" disabled={!admin} /><p className="mt-1 text-xs text-slate-500">Sales by agents priced lower than this go to the Sales Manager or Owner first.</p></div>
+        <div><label className="lbl">Commission payable after buyer has paid (%)</label><input name="commissionPayablePct" type="number" step="1" min={0} max={100} defaultValue={Number(company.commissionPayablePct)} className="input" disabled={!admin} /><p className="mt-1 text-xs text-slate-500">On new sales the full commission becomes payable once this share of the price is confirmed. Older sales keep unlocking step by step.</p></div>
         {admin && <div className="md:col-span-2"><SubmitButton>Save settings</SubmitButton></div>}
       </form>
 

@@ -22,15 +22,17 @@ export async function updateCompany(fd: FormData) {
   const staleLeadDays = Math.min(30, Math.max(1, Math.floor(num(fd, "staleLeadDays")) || 3));
   const discountApprovalPct = num(fd, "discountApprovalPct");
   if (!(discountApprovalPct >= 0 && discountApprovalPct <= 50)) back("/settings", { error: "Discount limit must be 0–50%" });
+  const commissionPayablePct = num(fd, "commissionPayablePct");
+  if (!(commissionPayablePct >= 0 && commissionPayablePct <= 100)) back("/settings", { error: "Commission payable point must be 0–100%" });
   const before = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
   const c = await db.company.update({
     where: { id: s.companyId },
-    data: { name: str(fd, "name") || undefined, reservationDays, followUpDays, calendar, locale, staleLeadDays, discountApprovalPct },
+    data: { name: str(fd, "name") || undefined, reservationDays, followUpDays, calendar, locale, staleLeadDays, discountApprovalPct, commissionPayablePct },
   });
   await createSession({ ...s, companyName: c.name, calendar: c.calendar, locale: c.locale });
   await audit(s, "company.updated", "Company", c.id, `reservation ${reservationDays}d, follow-up ${followUpDays}d, ${calendar}, discount limit ${discountApprovalPct}%`, {
-    before: { reservationDays: before.reservationDays, discountApprovalPct: Number(before.discountApprovalPct) },
-    after: { reservationDays, discountApprovalPct },
+    before: { reservationDays: before.reservationDays, discountApprovalPct: Number(before.discountApprovalPct), commissionPayablePct: Number(before.commissionPayablePct) },
+    after: { reservationDays, discountApprovalPct, commissionPayablePct },
   });
   back("/settings", { msg: "Settings saved" });
 }

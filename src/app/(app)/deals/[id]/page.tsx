@@ -5,11 +5,12 @@ import { requireSession } from "@/lib/session";
 import { canConfirmPayments, seesAll, FINANCE_VIEW } from "@/lib/permissions";
 import { fmtDate, fmtDateTime, label, money, toDateInput } from "@/lib/format";
 import { commissionState, dealFinancials } from "@/lib/finance";
+import { earnersOf } from "@/lib/commissions";
 import { DOCUMENT_TYPES, PAYMENT_METHODS } from "@/lib/options";
 import { Badge, Empty, Flash, PageHeader, Stat } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { DateField } from "@/components/DateField";
-import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reversePaymentAction, reviewPayment, uploadDealDocument, voidPaymentAction } from "../actions";
+import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reversePaymentAction, reviewPayment, uploadDealDocument, voidPaymentAction, saveSplits } from "../actions";
 import { planSummary } from "@/lib/plans";
 import { missingDocuments } from "@/lib/checklist";
 
@@ -28,12 +29,22 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       payments: { include: { recordedBy: true, confirmedBy: true, receipt: true, reversedBy: true }, orderBy: { createdAt: "desc" } },
       documents: { include: { uploadedBy: true }, orderBy: { createdAt: "desc" } },
       payouts: { include: { approvedBy: true }, orderBy: { approvedAt: "asc" } },
+      splits: { include: { user: true } },
     },
   });
   if (!deal || (!seesAll(s.role) && deal.agentId !== s.userId)) notFound();
   const missingDocs = missingDocuments(await db.documentRequirement.findMany({ where: { companyId: s.companyId } }), deal.documents);
   const f = dealFinancials(deal);
-  const c = commissionState(deal, f.confirmed, deal.payouts);
+  const earners = earnersOf(deal)
+    .filter((e) => seesAll(s.role) || e.userId === s.userId)
+    .map((e) => ({
+      user: e.userId === deal.agentId ? deal.agent : deal.splits.find((x) => x.userId === e.userId)!.user,
+      sharePct: e.sharePct,
+      payouts: deal.payouts.filter((p) => p.agentId === e.userId),
+      c: commissionState(deal, f.confirmed, deal.payouts.filter((p) => p.agentId === e.userId), e.sharePct),
+    }));
+  const splitter = s.role === "OWNER" || s.role === "MANAGER";
+  const team = splitter ? await db.user.findMany({ where: { companyId: s.companyId, active: true, role: { in: ["AGENT", "MANAGER"] } }, orderBy: { name: "asc" } }) : [];
   const finance = canConfirmPayments(s.role);
   const path = `/deals/${deal.id}`;
 
@@ -137,32 +148,54 @@ export default async function DealPage({ params, searchParams }: { params: Promi
 
         <div className="min-w-0 space-y-6">
           <div className="card space-y-2 text-sm">
-            <h2 className="h2">Commission · {deal.agent.name}</h2>
+            <h2 className="h2">Commission</h2>
             <div className="flex justify-between"><span className="text-slate-500">Rate</span><span>{Number(deal.commissionRate)}%</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Total earned</span><span>{money(c.total)}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Unlocked by collections</span><span>{money(c.accrued)}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Approved, not yet paid</span><span>{money(c.approved)}</span></div>
-            <div className="flex justify-between"><span className="text-slate-500">Paid to agent</span><span>{money(c.paid)}</span></div>
-            <div className="flex justify-between font-semibold"><span>Payable now</span><span className="text-emerald-700">{money(c.payable)}</span></div>
-            <div className="flex justify-between text-xs"><span className="text-slate-500">Locked until buyer pays</span><span>{money(c.locked)}</span></div>
-            {deal.payouts.map((p) => (
-              <div key={p.id} className="flex flex-wrap items-center justify-between gap-1 text-xs text-slate-500">
-                <span>{p.status === "PAID" ? `Paid ${money(p.amount)} on ${fmtDate(p.paidAt, s.calendar)}${p.reference ? ` (${p.reference})` : ""}` : `Approved ${money(p.amount)} on ${fmtDate(p.approvedAt, s.calendar)} by ${p.approvedBy.name}`}</span>
-                {finance && p.status === "APPROVED" && (
-                  <form action={markCommissionPaid} className="flex gap-1">
-                    <input type="hidden" name="payoutId" value={p.id} />
-                    <input type="hidden" name="returnTo" value={`/deals/${deal.id}`} />
-                    <input name="reference" placeholder="Ref" className="input w-24 py-1" />
-                    <SubmitButton className="btn btn-sm">Mark paid</SubmitButton>
+            <p className="text-xs text-slate-500">{deal.commissionPayablePct == null ? "Unlocks step by step as the buyer's payments are confirmed (older sale)." : `Payable in full once ${Number(deal.commissionPayablePct)}% of the price is confirmed.`}</p>
+            {earners.map(({ user, sharePct, payouts, c }) => (
+              <div key={user.id} className="space-y-1 border-t border-slate-100 pt-2">
+                <div className="font-medium">{user.name}{sharePct < 100 ? ` · ${sharePct}% share` : ""}</div>
+                <div className="flex justify-between"><span className="text-slate-500">Total earned</span><span>{money(c.total)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Approved, not yet paid</span><span>{money(c.approved)}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Paid</span><span>{money(c.paid)}</span></div>
+                <div className="flex justify-between font-semibold"><span>Payable now</span><span className="text-emerald-700">{money(c.payable)}</span></div>
+                <div className="flex justify-between text-xs"><span className="text-slate-500">Locked until buyer pays</span><span>{money(c.locked)}</span></div>
+                {payouts.map((p) => (
+                  <div key={p.id} className="flex flex-wrap items-center justify-between gap-1 text-xs text-slate-500">
+                    <span>{p.status === "PAID" ? `Paid ${money(p.amount)} on ${fmtDate(p.paidAt, s.calendar)}${p.reference ? ` (${p.reference})` : ""}` : `Approved ${money(p.amount)} on ${fmtDate(p.approvedAt, s.calendar)} by ${p.approvedBy.name}`}</span>
+                    {finance && p.status === "APPROVED" && (
+                      <form action={markCommissionPaid} className="flex gap-1">
+                        <input type="hidden" name="payoutId" value={p.id} />
+                        <input type="hidden" name="returnTo" value={path} />
+                        <input name="reference" placeholder="Ref" className="input w-24 py-1" />
+                        <SubmitButton className="btn btn-sm">Mark paid</SubmitButton>
+                      </form>
+                    )}
+                  </div>
+                ))}
+                {finance && c.payable > 0 && (
+                  <form action={approveCommission} className="flex gap-1 pt-1">
+                    <input type="hidden" name="dealId" value={deal.id} />
+                    <input type="hidden" name="agentId" value={user.id} />
+                    <input name="amount" defaultValue={c.payable} className="input py-1" />
+                    <SubmitButton className="btn btn-sm">Approve</SubmitButton>
                   </form>
                 )}
               </div>
             ))}
-            {finance && c.payable > 0 && (
-              <form action={approveCommission} className="flex gap-1 pt-2">
+            {splitter && deal.payouts.length === 0 && deal.status !== "CANCELLED" && (
+              <form action={saveSplits} className="space-y-2 border-t border-slate-100 pt-2">
                 <input type="hidden" name="dealId" value={deal.id} />
-                <input name="amount" defaultValue={c.payable} className="input py-1" />
-                <SubmitButton className="btn btn-sm">Approve</SubmitButton>
+                <div className="text-xs font-medium text-slate-600">Split between people (shares add up to 100%; locked once a commission is approved)</div>
+                {[0, 1, 2].map((i) => (
+                  <div key={i} className="flex gap-2">
+                    <select name="userId" defaultValue={earners[i]?.user.id ?? ""} className="input py-1">
+                      <option value="">—</option>
+                      {team.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                    </select>
+                    <input name="sharePct" defaultValue={earners[i]?.sharePct ?? ""} placeholder="%" inputMode="decimal" className="input w-20 py-1" />
+                  </div>
+                ))}
+                <SubmitButton className="btn btn-sm">Save split</SubmitButton>
               </form>
             )}
           </div>
