@@ -61,13 +61,15 @@ Reservations without a confirmed deposit are expired whenever relevant pages loa
 Once a day (e.g. 07:00), call `/api/cron/notifications` the same way: it creates reminders for due tasks,
 reservations ending within 24 hours and installments due within 3 days or late, and emails them when `SMTP_URL` is set.
 
+Also once a day, call `/api/cron/penalties` the same way. It does nothing unless the Owner switched late penalties on in Settings; then it adds one penalty per installment per month late (after the grace period, simple %, never compounding, optional cap). The Accountant or Owner waives (with a reason) or marks each penalty collected on the sale page.
+
 ## Environment variables
 
 | Variable | Purpose |
 |---|---|
 | `DATABASE_URL` | PostgreSQL connection |
 | `AUTH_SECRET` | Session signing key (`openssl rand -base64 32`) |
-| `CRON_SECRET` | Bearer token for `/api/cron/expire-reservations` and `/api/cron/notifications` |
+| `CRON_SECRET` | Bearer token for `/api/cron/expire-reservations`, `/api/cron/notifications` and `/api/cron/penalties` |
 | `SMTP_URL`, `SMTP_FROM`, `APP_URL` | Optional: email notifications (in-app notifications always work) |
 | `UPLOAD_DIR` | Local folder for files when S3 is not configured |
 | `S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | Optional S3-compatible storage (AWS S3, R2, MinIO). Leave `S3_BUCKET` empty to use local disk |
