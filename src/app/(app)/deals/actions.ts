@@ -12,6 +12,7 @@ import { createSale } from "@/lib/sales";
 import { confirmPayment, rejectPayment, reversePayment, voidPayment } from "@/lib/payments";
 import { seesAll, SALES, ACCOUNTS, FINANCE_VIEW, MANAGERS } from "@/lib/permissions";
 import { approveCommissionFor, setDealSplits } from "@/lib/commissions";
+import { decidePenalty } from "@/lib/penalties";
 import { parseDateInput } from "@/lib/format";
 import { saveDocument, validFile } from "@/lib/documents";
 
@@ -186,4 +187,17 @@ export async function cancelDeal(fd: FormData) {
   ]);
   await audit(s, "deal.cancelled", "Deal", deal.id, reason, { before: { status: deal.status, unitStatus: deal.unit.status }, after: { status: "CANCELLED", unitStatus: "AVAILABLE" } });
   back(`/deals/${deal.id}`, { msg: "Deal cancelled; unit released" });
+}
+
+export async function decidePenaltyAction(fd: FormData) {
+  const s = await requireSession(ACCOUNTS);
+  const dealId = str(fd, "dealId");
+  const action = str(fd, "action") === "COLLECT" ? "COLLECT" : "WAIVE";
+  try {
+    await decidePenalty(s, str(fd, "penaltyId"), action, str(fd, "note"));
+  } catch (e) {
+    if (e instanceof RuleError) back(`/deals/${dealId}`, { error: e.message });
+    throw e;
+  }
+  back(`/deals/${dealId}`, { msg: action === "WAIVE" ? "Penalty waived" : "Penalty marked collected" });
 }

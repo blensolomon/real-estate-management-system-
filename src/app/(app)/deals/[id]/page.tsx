@@ -10,7 +10,7 @@ import { DOCUMENT_TYPES, PAYMENT_METHODS } from "@/lib/options";
 import { Badge, Empty, Flash, PageHeader, Stat } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { DateField } from "@/components/DateField";
-import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reversePaymentAction, reviewPayment, uploadDealDocument, voidPaymentAction, saveSplits } from "../actions";
+import { cancelDeal, approveCommission, markCommissionPaid, recordPayment, reversePaymentAction, reviewPayment, uploadDealDocument, voidPaymentAction, saveSplits, decidePenaltyAction } from "../actions";
 import { planSummary } from "@/lib/plans";
 import { missingDocuments } from "@/lib/checklist";
 
@@ -30,6 +30,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       documents: { include: { uploadedBy: true }, orderBy: { createdAt: "desc" } },
       payouts: { include: { approvedBy: true }, orderBy: { approvedAt: "asc" } },
       splits: { include: { user: true } },
+      penalties: { include: { installment: true }, orderBy: [{ installmentId: "asc" }, { monthNo: "asc" }] },
     },
   });
   if (!deal || (!seesAll(s.role) && deal.agentId !== s.userId)) notFound();
@@ -199,6 +200,29 @@ export default async function DealPage({ params, searchParams }: { params: Promi
               </form>
             )}
           </div>
+
+          {deal.penalties.length > 0 && (
+            <div className="card space-y-2 text-sm">
+              <h2 className="h2">Late penalties</h2>
+              <p className="muted">Open: {money(deal.penalties.filter((p) => p.status === "OPEN").reduce((a, p) => a + Number(p.amount), 0))}. Separate from the price; not counted in the balance.</p>
+              <ul className="space-y-2">
+                {deal.penalties.map((p) => (
+                  <li key={p.id} className="border-t border-slate-100 pt-2">
+                    <div className="flex justify-between gap-2"><span>{p.installment.label} · month {p.monthNo}</span><span className="font-medium">{money(p.amount)} <Badge>{p.status}</Badge></span></div>
+                    {(p.reason || p.reference) && <div className="text-xs text-slate-500">{p.reason ?? p.reference}</div>}
+                    {finance && p.status === "OPEN" && (
+                      <form action={decidePenaltyAction} className="mt-1 flex gap-1">
+                        <input type="hidden" name="dealId" value={deal.id} /><input type="hidden" name="penaltyId" value={p.id} />
+                        <input name="note" className="input py-1" placeholder="Reason to waive / payment ref" required />
+                        <button name="action" value="WAIVE" className="btn-secondary btn-sm">Waive</button>
+                        <button name="action" value="COLLECT" className="btn btn-sm">Collected</button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
 
           <div className="card space-y-3 text-sm">
             <h2 className="h2">Documents</h2>

@@ -6,6 +6,8 @@ import { requireSession } from "@/lib/session";
 import { ADMINS } from "@/lib/permissions";
 import { audit } from "@/lib/audit";
 import { saveTiers } from "@/lib/commissions";
+import { markMilestoneReached, saveMilestones } from "@/lib/milestones";
+import { parseDateInput } from "@/lib/format";
 import { RuleError } from "@/lib/rules";
 import { back, isUniqueViolation, num, str } from "@/lib/actions-util";
 
@@ -116,4 +118,31 @@ export async function saveTiersAction(fd: FormData) {
     throw e;
   }
   back(`/inventory/${projectId}`, { msg: "Commission tiers saved. They apply to new sales." });
+}
+
+export async function saveMilestonesAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  const projectId = str(fd, "projectId");
+  const pcts = fd.getAll("pct").map((v) => Number(String(v).trim() || 0));
+  const dates = fd.getAll("expectedAt").map((v) => parseDateInput(String(v)));
+  const items = fd.getAll("stageName").map((v, i) => ({ name: String(v), pct: pcts[i] || 0, expectedAt: dates[i] ?? null }));
+  try {
+    await saveMilestones(s, projectId, items);
+  } catch (e) {
+    if (e instanceof RuleError) back(`/inventory/${projectId}`, { error: e.message });
+    throw e;
+  }
+  back(`/inventory/${projectId}`, { msg: "Construction stages saved" });
+}
+
+export async function markReachedAction(fd: FormData) {
+  const s = await requireSession(ADMINS);
+  const projectId = str(fd, "projectId");
+  try {
+    const r = await markMilestoneReached(s, str(fd, "milestoneId"));
+    back(`/inventory/${projectId}`, { msg: `Stage marked reached. ${r.count} client payment(s) are now due.` });
+  } catch (e) {
+    if (e instanceof RuleError) back(`/inventory/${projectId}`, { error: e.message });
+    throw e;
+  }
 }
