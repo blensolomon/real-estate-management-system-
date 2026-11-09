@@ -3,7 +3,7 @@ import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
 import { requireSession } from "@/lib/session";
 import { seesAll, SALES } from "@/lib/permissions";
-import { fmtDate, daysBetween } from "@/lib/format";
+import { addDays, daysBetween, fmtDate, parseDateInput, toDateInput } from "@/lib/format";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
 import { completeFollowUp } from "../leads/actions";
@@ -15,7 +15,7 @@ export default async function FollowUpsPage({ searchParams }: { searchParams: Pr
   if (!seesAll(s.role)) where.assigneeId = s.userId;
   else if (sp.agent) where.assigneeId = sp.agent;
   const now = new Date();
-  const endOfToday = new Date(now.getTime() + 86400000);
+  const endOfToday = addDays(parseDateInput(toDateInput(now))!, 1);
   const [items, users, staleLeads] = await Promise.all([
     db.followUp.findMany({ where, include: { lead: true, assignee: true, project: true }, orderBy: { dueAt: "asc" }, take: 300 }),
     db.user.findMany({ where: { companyId: s.companyId, active: true }, orderBy: { name: "asc" } }),

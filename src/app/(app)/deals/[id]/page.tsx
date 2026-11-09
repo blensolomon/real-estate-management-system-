@@ -59,7 +59,7 @@ export default async function DealPage({ params, searchParams }: { params: Promi
       <Flash msg={sp.msg} error={sp.error} />
       <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-5">
         <Stat label="Price" value={money(f.price)} />
-        <Stat label="Confirmed paid" value={money(f.confirmed)} tone="green" sub={`${f.price ? Math.round((f.confirmed / f.price) * 100) : 0}% collected`} />
+        <Stat label="Confirmed paid" value={money(f.confirmed)} tone="green" sub={`${f.price ? Math.floor((f.confirmed / f.price) * 100) : 0}% collected`} />
         <Stat label="Pending confirmation" value={money(f.pending)} tone="amber" />
         <Stat label="Balance" value={money(f.balance)} />
         <Stat label="Overdue" value={money(f.overdueAmount)} tone={f.overdueAmount > 0 ? "red" : undefined} sub={f.overdueAmount > 0 ? `oldest ${f.oldestOverdueDays} days` : f.nextDue ? `next: ${money(f.nextDue.remaining)} on ${fmtDate(f.nextDue.dueDate, s.calendar)}` : undefined} />

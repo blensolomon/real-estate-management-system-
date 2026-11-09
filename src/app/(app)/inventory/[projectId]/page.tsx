@@ -157,10 +157,10 @@ export default async function ProjectPage({
               <form action={saveMilestonesAction} className="space-y-2">
                 <input type="hidden" name="projectId" value={project.id} />
                 {[0, 1, 2, 3, 4].map((i) => (
-                  <div key={i} className="grid grid-cols-3 gap-2">
+                  <div key={i} className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     <input name="stageName" defaultValue={stages[i]?.name ?? ""} placeholder="Stage, e.g. Foundation" className="input" />
                     <input name="pct" defaultValue={stages[i] ? Number(stages[i].pct) : ""} placeholder="%" inputMode="decimal" className="input" />
-                    <DateField name="expectedAt" calendar={s.calendar} defaultValue={stages[i] ? toDateInput(stages[i].expectedAt) : ""} />
+                    <div className="col-span-2 sm:col-span-1"><DateField name="expectedAt" calendar={s.calendar} defaultValue={stages[i] ? toDateInput(stages[i].expectedAt) : ""} /></div>
                   </div>
                 ))}
                 <p className="text-xs text-slate-500">Shares must add up to 100%. Stages lock once a sale uses them.</p>
