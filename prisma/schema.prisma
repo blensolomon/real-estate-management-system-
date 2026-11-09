@@ -123,6 +123,8 @@ model Company {
   staleLeadDays       Int             @default(3)
   receiptSeq          Int             @default(0)
   discountApprovalPct Decimal         @default(5) @db.Decimal(5, 2)
+  active              Boolean         @default(true)
+  suspendedAt         DateTime?
   priceApprovals      PriceApproval[]
   createdAt           DateTime        @default(now())
 

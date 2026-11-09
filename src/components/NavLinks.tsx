@@ -61,7 +61,12 @@ export function BottomNav({ role, footer }: { role: string; footer: React.ReactN
     <>
       {open && (
         <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setOpen(false)}>
-          <div className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl bg-white p-4 pb-24" onClick={(e) => e.stopPropagation()}>
+          <div className="absolute inset-x-0 bottom-0 max-h-[80vh] overflow-y-auto rounded-t-2xl bg-white p-4 pb-24"
+            onClick={(e) => {
+              e.stopPropagation();
+              if ((e.target as HTMLElement).closest("a")) setOpen(false);
+            }}
+          >
             <div className="grid grid-cols-3 gap-2">
               {items.map((i) => (
                 <Link key={i.href} href={i.href} onClick={() => setOpen(false)} className={`flex min-h-20 flex-col items-center justify-center gap-1 rounded-xl border p-2 text-center text-xs ${isActive(path, i.href) ? "border-emerald-600 bg-emerald-50 text-emerald-800" : "border-slate-200"}`}>

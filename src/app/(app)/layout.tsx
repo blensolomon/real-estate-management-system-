@@ -6,16 +6,22 @@ import { formatEthiopian } from "@/lib/ethiopian";
 import { formatGregorian } from "@/lib/format";
 import { I18nProvider } from "@/i18n/client";
 import { enumLabel, translator } from "@/i18n";
+import { db } from "@/lib/db";
+import { isPlatformAdmin } from "@/lib/tenancy";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const s = await requireSession();
   const t = translator(s.locale);
   const now = new Date();
+  const me = await db.user.findUnique({ where: { id: s.userId }, select: { email: true } });
   const footer = (
     <>
       <div className="text-slate-400">{formatEthiopian(now)} · {formatGregorian(now)}</div>
       <div className="mt-2 font-medium">{s.name}</div>
       <div className="text-slate-400">{enumLabel(t, s.role)}</div>
+      {isPlatformAdmin(me?.email) && (
+        <Link href="/platform" className="mt-2 block min-h-11 py-2 text-emerald-600 hover:underline">{t("All companies (platform)")}</Link>
+      )}
       <form action={logout}>
         <button className="mt-2 min-h-11 cursor-pointer text-emerald-600 hover:underline">{t("Sign out")}</button>
       </form>

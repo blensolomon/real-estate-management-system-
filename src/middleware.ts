@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 
-const PUBLIC = ["/login", "/register", "/api/cron"];
+const PUBLIC = ["/login", "/register", "/api/cron", "/api/auth/signout"];
 const key = new TextEncoder().encode(process.env.AUTH_SECRET);
 
 export async function middleware(req: NextRequest) {
