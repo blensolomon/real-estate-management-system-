@@ -9,7 +9,7 @@ import { LOCALES } from "@/i18n";
 import { label } from "@/lib/format";
 import { Badge, Flash, PageHeader } from "@/components/ui";
 import { SubmitButton } from "@/components/SubmitButton";
-import { addUser, moveLeadsAction, updateCompany, updateUser } from "./actions";
+import { addUser, moveLeadsAction, savePenaltyRule, updateCompany, updateUser } from "./actions";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string }> }) {
   const s = await requireSession(ADMINS);
@@ -40,6 +40,16 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <div><label className="lbl">Price below list needing approval (%)</label><input name="discountApprovalPct" type="number" step="0.5" min={0} max={50} defaultValue={Number(company.discountApprovalPct)} className="input" disabled={!admin} /><p className="mt-1 text-xs text-slate-500">Sales by agents priced lower than this go to the Sales Manager or Owner first.</p></div>
         <div><label className="lbl">Commission payable after buyer has paid (%)</label><input name="commissionPayablePct" type="number" step="1" min={0} max={100} defaultValue={Number(company.commissionPayablePct)} className="input" disabled={!admin} /><p className="mt-1 text-xs text-slate-500">On new sales the full commission becomes payable once this share of the price is confirmed. Older sales keep unlocking step by step.</p></div>
         {admin && <div className="md:col-span-2"><SubmitButton>Save settings</SubmitButton></div>}
+      </form>
+
+      <form action={savePenaltyRule} className="card grid max-w-3xl gap-4 md:grid-cols-2">
+        <div className="md:col-span-2"><h2 className="h2">Late payments and construction stages</h2><p className="muted">Only the Owner can change these. Penalties are off unless you switch them on; they never compound and the Accountant or Owner can waive them with a reason.</p></div>
+        <label className="flex items-center gap-2 md:col-span-2"><input type="checkbox" name="penaltyEnabled" defaultChecked={company.penaltyEnabled} disabled={s.role !== "OWNER"} className="h-5 w-5" /> Charge late penalties</label>
+        <div><label className="lbl">Penalty per month late (% of the late amount)</label><input name="penaltyPctPerMonth" type="number" step="0.1" min={0} max={10} defaultValue={Number(company.penaltyPctPerMonth)} className="input" disabled={s.role !== "OWNER"} /></div>
+        <div><label className="lbl">Grace period (days)</label><input name="penaltyGraceDays" type="number" min={0} max={90} defaultValue={company.penaltyGraceDays} className="input" disabled={s.role !== "OWNER"} /></div>
+        <div><label className="lbl">Maximum total penalty (% of the installment, empty = no cap)</label><input name="penaltyCapPct" type="number" step="0.5" min={1} max={100} defaultValue={company.penaltyCapPct == null ? "" : Number(company.penaltyCapPct)} className="input" disabled={s.role !== "OWNER"} /></div>
+        <div><label className="lbl">Stage payment due after stage reached (days)</label><input name="milestoneDueDays" type="number" min={0} max={180} defaultValue={company.milestoneDueDays} className="input" disabled={s.role !== "OWNER"} /></div>
+        {s.role === "OWNER" && <div className="md:col-span-2"><SubmitButton>Save payment rules</SubmitButton></div>}
       </form>
 
       <div className="card overflow-x-auto p-0">

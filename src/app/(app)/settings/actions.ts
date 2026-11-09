@@ -81,3 +81,26 @@ export async function moveLeadsAction(fd: FormData) {
   }
   back("/settings", { msg });
 }
+
+/** Owner only: late-penalty rule and construction-stage due days (money rules). */
+export async function savePenaltyRule(fd: FormData) {
+  const s = await requireSession(["OWNER"]);
+  const penaltyEnabled = str(fd, "penaltyEnabled") === "on";
+  const penaltyGraceDays = Math.floor(num(fd, "penaltyGraceDays"));
+  const penaltyPctPerMonth = num(fd, "penaltyPctPerMonth");
+  const capRaw = str(fd, "penaltyCapPct");
+  const penaltyCapPct = capRaw === "" ? null : Number(capRaw);
+  const milestoneDueDays = Math.floor(num(fd, "milestoneDueDays"));
+  if (!(penaltyGraceDays >= 0 && penaltyGraceDays <= 90)) back("/settings", { error: "Grace period must be 0–90 days" });
+  if (!(penaltyPctPerMonth >= 0 && penaltyPctPerMonth <= 10)) back("/settings", { error: "Penalty must be 0–10% per month" });
+  if (penaltyEnabled && !(penaltyPctPerMonth > 0)) back("/settings", { error: "Set a penalty % above 0 to switch penalties on" });
+  if (penaltyCapPct != null && !(penaltyCapPct > 0 && penaltyCapPct <= 100)) back("/settings", { error: "Cap must be 1–100% or empty" });
+  if (!(milestoneDueDays >= 0 && milestoneDueDays <= 180)) back("/settings", { error: "Stage payment days must be 0–180" });
+  const before = await db.company.findUniqueOrThrow({ where: { id: s.companyId } });
+  await db.company.update({ where: { id: s.companyId }, data: { penaltyEnabled, penaltyGraceDays, penaltyPctPerMonth, penaltyCapPct, milestoneDueDays } });
+  await audit(s, "penalty.rule.updated", "Company", s.companyId, `penalties ${penaltyEnabled ? "on" : "off"}, ${penaltyPctPerMonth}%/month after ${penaltyGraceDays}d, cap ${penaltyCapPct ?? "none"}; stage dues ${milestoneDueDays}d`, {
+    before: { penaltyEnabled: before.penaltyEnabled, penaltyGraceDays: before.penaltyGraceDays, penaltyPctPerMonth: Number(before.penaltyPctPerMonth), penaltyCapPct: before.penaltyCapPct == null ? null : Number(before.penaltyCapPct), milestoneDueDays: before.milestoneDueDays },
+    after: { penaltyEnabled, penaltyGraceDays, penaltyPctPerMonth, penaltyCapPct, milestoneDueDays },
+  });
+  back("/settings", { msg: "Payment rules saved" });
+}
