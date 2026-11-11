@@ -159,6 +159,14 @@ model Company {
   priceApprovals       PriceApproval[]
   createdAt            DateTime        @default(now())
 
+  // SaaS subscription fields
+  subscriptionId       String?
+  subscription         Subscription?
+  onboardingStage      String          @default("NOT_STARTED") // NOT_STARTED, PLAN_SELECTED, BILLING_ADDED, ACTIVE
+  onboardedAt          DateTime?
+  planName             String          @default("Free") // Cached from Subscription -> Plan -> name
+  planUpdatedAt        DateTime        @default(now())
+
   users                  User[]
   projects               Project[]
   units                  Unit[]
@@ -179,6 +187,13 @@ model Company {
   commissionSplits       CommissionSplit[]
   constructionMilestones ConstructionMilestone[]
   penalties              Penalty[]
+  featureOverrides       CompanyFeatureOverride[]
+  billingContacts        BillingContact[]
+  subscriptionPaymentMethods SubscriptionPaymentMethod[]
+  invoices               Invoice[]
+  usageMetrics           UsageMetric[]
+
+  @@index([subscriptionId])
 }
 
 model User {
@@ -670,4 +685,249 @@ model Penalty {
 
   @@unique([installmentId, monthNo])
   @@index([companyId, status])
+}
+
+// ============================================================================
+// SaaS PLATFORM ADMIN MODELS (Week 1)
+// ============================================================================
+
+enum PlatformUserRole {
+  ADMIN
+  BILLING_MANAGER
+  SUPPORT
+  VIEWER
+}
+
+model PlatformUser {
+  id           String              @id @default(cuid())
+  email        String              @unique
+  name         String
+  passwordHash String
+  role         PlatformUserRole    @default(ADMIN)
+  active       Boolean             @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
+
+  auditLogs PlatformAuditLog[]
+}
+
+model PlatformAuditLog {
+  id              String        @id @default(cuid())
+  platformUserId  String?
+  platformUser    PlatformUser? @relation(fields: [platformUserId], references: [id], onDelete: SetNull)
+  action          String // e.g., "CREATE_COMPANY", "SUSPEND_COMPANY", "PROCESS_PAYMENT"
+  entity          String // e.g., "Company", "Plan", "Subscription"
+  entityId        String?
+  detail          String?
+  before          Json?
+  after           Json?
+  ipAddress       String?
+  userAgent       String?
+  createdAt       DateTime      @default(now())
+
+  @@index([platformUserId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+}
+
+enum BillingCycle {
+  MONTHLY
+  ANNUAL
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAUSED
+  CANCELLED
+  PENDING_PAYMENT
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String   @unique // "Free", "Starter", "Professional", "Enterprise"
+  description String?
+  monthlyPrice Decimal @db.Decimal(10, 2) @default(0)
+  yearlyPrice  Decimal? @db.Decimal(10, 2)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  features        PlanFeature[]
+  subscriptions   Subscription[]
+
+  @@index([active])
+}
+
+model PlanFeature {
+  id        String  @id @default(cuid())
+  planId    String
+  plan      Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  feature   String // "maxProjects", "maxUsers", "maxMonthlyTransactions", "commissionEngine", "reportingAdvanced"
+  limit     Int? // NULL = unlimited
+  createdAt DateTime @default(now())
+
+  @@unique([planId, feature])
+  @@index([feature])
+}
+
+model CompanyFeatureOverride {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  feature   String // same as PlanFeature.feature
+  limit     Int? // NULL = unlimited
+  reason    String? // "customer request", "legacy contract"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, feature])
+  @@index([companyId])
+}
+
+model Subscription {
+  id                    String              @id @default(cuid())
+  companyId             String              @unique
+  company               Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  planId                String
+  plan                  Plan                @relation(fields: [planId], references: [id], onDelete: Restrict)
+  status                SubscriptionStatus  @default(ACTIVE)
+  currentCycleStartAt   DateTime
+  currentCycleEndAt     DateTime
+  trialStartAt          DateTime?
+  trialEndAt            DateTime?
+  nextBillingAt         DateTime?
+  lastBilledAt          DateTime?
+  cancelledAt           DateTime?
+  cancelReason          String?
+  autoRenew             Boolean             @default(true)
+  billingCycle          BillingCycle        @default(MONTHLY)
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  invoices      Invoice[]
+  usageMetrics  UsageMetric[]
+
+  @@index([companyId])
+  @@index([planId])
+  @@index([nextBillingAt])
+}
+
+model BillingContact {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  name       String
+  email      String
+  phone      String?
+  address    String?
+  city       String?
+  state      String?
+  zipCode    String?
+  country    String?
+  taxId      String? // VAT/TAX ID
+  isDefault  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([companyId])
+}
+
+enum SubscriptionPaymentMethodType {
+  CREDIT_CARD
+  BANK_TRANSFER
+  STRIPE_CUSTOMER
+}
+
+model SubscriptionPaymentMethod {
+  id                     String                         @id @default(cuid())
+  companyId              String
+  company                Company                        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  type                   SubscriptionPaymentMethodType
+  stripePaymentMethodId  String?
+  stripeCustomerId       String?
+  last4                  String?
+  brand                  String? // "visa", "mastercard", "amex"
+  expiryMonth            Int?
+  expiryYear             Int?
+  isDefault              Boolean                        @default(false)
+  active                 Boolean                        @default(true)
+  createdAt              DateTime                       @default(now())
+  updatedAt              DateTime                       @updatedAt
+
+  @@index([companyId])
+  @@index([stripeCustomerId])
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PAID
+  OVERDUE
+  CANCELLED
+  FAILED
+}
+
+model Invoice {
+  id                     String           @id @default(cuid())
+  companyId              String
+  company                Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscriptionId         String
+  subscription           Subscription     @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  invoiceNumber          String // "INV-2026-001", unique per company
+  status                 InvoiceStatus    @default(DRAFT)
+  billingPeriodStartAt   DateTime
+  billingPeriodEndAt     DateTime
+  dueAt                  DateTime
+  issuedAt               DateTime
+  paidAt                 DateTime?
+  amount                 Decimal          @db.Decimal(10, 2) // Subscription fee
+  usageOverageAmount     Decimal          @db.Decimal(10, 2) @default(0)
+  discountAmount         Decimal          @db.Decimal(10, 2) @default(0)
+  taxAmount              Decimal          @db.Decimal(10, 2) @default(0)
+  totalAmount            Decimal          @db.Decimal(10, 2)
+  stripeInvoiceId        String?
+  notes                  String?
+  createdAt              DateTime         @default(now())
+  updatedAt              DateTime         @updatedAt
+
+  overageCharges OverageCharge[]
+
+  @@unique([companyId, invoiceNumber])
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
+model UsageMetric {
+  id             String  @id @default(cuid())
+  companyId      String
+  company        Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  subscriptionId String
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Restrict)
+  billingMonth   String // "2026-11"
+  metric         String // "transactions", "users", "projects", "storage_gb"
+  used           Int
+  limit          Int?
+  status         String  @default("UNDER") // UNDER, WARNING, EXCEEDED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([companyId, billingMonth, metric])
+  @@index([companyId])
+  @@index([subscriptionId])
+}
+
+model OverageCharge {
+  id             String   @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  metric         String
+  usedQuantity   Int
+  limitQuantity  Int?
+  excessQuantity Int
+  pricePerUnit   Decimal  @db.Decimal(10, 2)
+  totalCharge    Decimal  @db.Decimal(10, 2)
+  createdAt      DateTime @default(now())
+
+  @@index([invoiceId])
 }

@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyLeads } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { seesAll, SALES } from "@/lib/permissions";
 import { fmtDate, label } from "@/lib/format";
 import { LEAD_SOURCES, LEAD_STATUSES } from "@/lib/options";
@@ -10,7 +11,12 @@ import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 type SP = { q?: string; status?: string; source?: string; owner?: string; msg?: string; error?: string };
 
 export default async function LeadsPage({ searchParams }: { searchParams: Promise<SP> }) {
-  const s = await requireSession(SALES);
+  // Guard: Check if user has permission to view leads
+  await guardCompanyLeads();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const where: Prisma.LeadWhereInput = { companyId: s.companyId };
   if (!seesAll(s.role)) where.ownerId = s.userId;

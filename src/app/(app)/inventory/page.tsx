@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyProjects } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { canAdmin } from "@/lib/permissions";
 import { expireReservations } from "@/lib/reservations";
 import { money } from "@/lib/format";
@@ -9,7 +10,12 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { createProject } from "./actions";
 
 export default async function InventoryPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string }> }) {
-  const s = await requireSession();
+  // Guard: Check if user has permission to view projects
+  await guardCompanyProjects();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   await expireReservations(s.companyId);
   const projects = await db.project.findMany({

@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyCollections } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { ExportButtons } from "@/components/ExportButtons";
 import { FINANCE_VIEW } from "@/lib/permissions";
 import { loadCollections } from "@/lib/collections";
@@ -8,7 +9,12 @@ import { fmtDate, money } from "@/lib/format";
 import { Empty, PageHeader, Stat } from "@/components/ui";
 
 export default async function CollectionsPage({ searchParams }: { searchParams: Promise<{ project?: string; q?: string; agent?: string; view?: string }> }) {
-  const s = await requireSession(FINANCE_VIEW);
+  // Guard: Check if user has permission to view collections
+  await guardCompanyCollections();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const extra = {
     ...(sp.project ? { unit: { projectId: sp.project } } : {}),

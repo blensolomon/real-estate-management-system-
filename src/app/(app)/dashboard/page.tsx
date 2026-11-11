@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyDashboard } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { canManage, seesAll } from "@/lib/permissions";
 import { expireReservations, isHeld } from "@/lib/reservations";
 import { loadCollections } from "@/lib/collections";
@@ -26,7 +27,12 @@ function Contact({ phone, t }: { phone: string; t: (s: string) => string }) {
 }
 
 export default async function DashboardPage({ searchParams }: { searchParams: Promise<{ denied?: string; msg?: string; error?: string }> }) {
-  const s = await requireSession();
+  // Guard: Check if user has permission to view dashboard
+  await guardCompanyDashboard();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const t = await getT();
   await expireReservations(s.companyId);

@@ -1,16 +1,25 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { requireSession } from "@/lib/session";
+import { getSession } from "@/lib/session";
 import { back, str } from "@/lib/actions-util";
 import { RuleError } from "@/lib/rules";
 import { setCompanyActive } from "@/lib/tenancy";
+import { guardCompanyAction, logCompanyAudit } from "@/lib/permission-guards";
 
 export async function toggleCompany(fd: FormData) {
-  const s = await requireSession();
+  // Guard: Check permission to edit settings
+  const guard = await guardCompanyAction("EDIT_SETTINGS");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const active = str(fd, "active") === "true";
+  const companyId = str(fd, "companyId");
+  const note = str(fd, "note");
   try {
-    await setCompanyActive(s.userId, str(fd, "companyId"), active, str(fd, "note"));
+    await setCompanyActive(s.userId, companyId, active, note);
+    await logCompanyAudit(s.companyId, s.userId, "EDIT_SETTINGS", "Company", companyId, `Company ${active ? "reactivated" : "suspended"}: ${note}`);
   } catch (e) {
     if (e instanceof RuleError) back("/platform", { error: e.message });
     throw e;

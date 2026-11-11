@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyCommissions } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { canConfirmPayments, seesAll, FINANCE_VIEW } from "@/lib/permissions";
 import { fmtDate, money } from "@/lib/format";
 import { round } from "@/lib/finance";
@@ -12,7 +13,12 @@ import { approveCommission, markCommissionPaid } from "../deals/actions";
 import { loadCommissions, type CommissionsSP as SP } from "@/lib/commissions";
 
 export default async function CommissionsPage({ searchParams }: { searchParams: Promise<SP> }) {
-  const s = await requireSession(FINANCE_VIEW);
+  // Guard: Check if user has permission to view commissions
+  await guardCompanyCommissions();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const t = await getT();
   const { agentFilter, rows } = await loadCommissions(s, sp);

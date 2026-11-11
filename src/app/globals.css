@@ -18,7 +18,9 @@
   .link { @apply text-emerald-700 hover:underline; }
 }
 
-body { @apply bg-slate-50 text-slate-800; }
+@layer base {
+  body { @apply bg-slate-50 text-slate-800; }
+}
 
 @media print {
   body { background: white; }

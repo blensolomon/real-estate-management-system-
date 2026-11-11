@@ -21,6 +21,13 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
       <p className="muted text-center">
         New company? <Link href="/register" className="link">Create an account</Link>
       </p>
+      <div className="border-t border-slate-300 pt-4">
+        <p className="muted text-center text-xs">
+          <Link href="/platform-admin/login" className="link font-medium">
+            Platform Administrator Login
+          </Link>
+        </p>
+      </div>
     </form>
   );
 }

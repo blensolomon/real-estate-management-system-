@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyDeals } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { FINANCE_VIEW } from "@/lib/permissions";
 import { ExportButtons } from "@/components/ExportButtons";
 import { seesAll } from "@/lib/permissions";
@@ -10,7 +11,12 @@ import { dealFinancials } from "@/lib/finance";
 import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 
 export default async function DealsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string; q?: string }> }) {
-  const s = await requireSession(FINANCE_VIEW);
+  // Guard: Check if user has permission to view deals
+  await guardCompanyDeals();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const where: Prisma.DealWhereInput = { companyId: s.companyId, ...(sp.status ? { status: sp.status as never } : {}) };
   if (!seesAll(s.role)) where.agentId = s.userId;

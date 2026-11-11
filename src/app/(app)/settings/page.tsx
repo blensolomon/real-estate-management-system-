@@ -1,7 +1,8 @@
 import { saveChecklist } from "./checklist-actions";
 import { DOC_TYPES } from "@/lib/checklist";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanySettings } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { ADMINS } from "@/lib/permissions";
 import { ROLES } from "@/lib/options";
 import { canAdmin } from "@/lib/permissions";
@@ -12,7 +13,11 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { addUser, moveLeadsAction, savePenaltyRule, updateCompany, updateUser } from "./actions";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string }> }) {
-  const s = await requireSession(ADMINS);
+  // Guard: Check if user has permission to view settings
+  await guardCompanySettings();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
   const sp = await searchParams;
   const admin = canAdmin(s.role);
   const [company, users, requirements] = await Promise.all([

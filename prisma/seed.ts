@@ -119,7 +119,21 @@ async function main() {
   await db.company.update({ where: { id: company.id }, data: { receiptSeq: receiptNo } });
   const month = monthOf(new Date(), company.calendar).key;
   for (const [i, a] of agents.entries()) await db.salesTarget.create({ data: { companyId: company.id, userId: a.id, month, amount: [12_000_000, 8_000_000, 5_000_000][i] } });
+  
+  // Seed platform admins
+  const platformAdminHash = await bcrypt.hash("admin123", 10);
+  await db.platformUser.deleteMany({}); // Clean up old admins
+  const platformAdmin = await db.platformUser.create({
+    data: {
+      email: "admin@platform.et",
+      name: "Platform Admin",
+      passwordHash: platformAdminHash,
+      role: "ADMIN",
+    },
+  });
+  
   console.log("Seeded. Log in as owner@demo.et / password123");
+  console.log("Platform admin: admin@platform.et / admin123");
 }
 
 main().finally(() => db.$disconnect());

@@ -7,26 +7,40 @@ import { useT } from "@/i18n/client";
 
 type Item = { href: string; label: string; icon: string; roles?: string[] };
 
-const SALES = ["OWNER", "MANAGER", "AGENT"];
+/**
+ * Sidebar navigation items mapped to role permissions.
+ * Each role sees only the sections they have permissions for.
+ */
 export const NAV_ITEMS: Item[] = [
-  { href: "/dashboard", label: "Home", icon: "⌂" },
-  { href: "/my-day", label: "My day", icon: "☀", roles: SALES },
-  { href: "/leads", label: "Leads", icon: "☺", roles: SALES },
-  { href: "/pipeline", label: "Pipeline", icon: "▥", roles: SALES },
-  { href: "/follow-ups", label: "Tasks & visits", icon: "✓", roles: SALES },
-  { href: "/collections", label: "Who owes us money", icon: "!", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
-  { href: "/inventory", label: "Units", icon: "▦" },
-  { href: "/reservations", label: "Reservations", icon: "◷", roles: SALES },
-  { href: "/deals", label: "Sales", icon: "★", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
-  { href: "/payments", label: "Payments", icon: "₿", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
-  { href: "/commissions", label: "Commissions", icon: "%", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
-  { href: "/clients", label: "Clients & files", icon: "▤", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT"] },
+  // All roles can see Dashboard (VIEW_DASHBOARD)
+  { href: "/dashboard", label: "Home", icon: "⌂", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT", "ADMIN"] },
+
+  // Sales-focused sections
+  { href: "/my-day", label: "My day", icon: "☀", roles: ["AGENT"] },
+  { href: "/leads", label: "Leads", icon: "☺", roles: ["OWNER", "MANAGER", "AGENT", "ADMIN"] },
+  { href: "/pipeline", label: "Pipeline", icon: "▥", roles: ["OWNER", "MANAGER", "AGENT", "ADMIN"] },
+  { href: "/follow-ups", label: "Tasks & visits", icon: "✓", roles: ["OWNER", "MANAGER", "AGENT", "ADMIN"] },
+
+  // Financial sections
+  { href: "/collections", label: "Who owes us money", icon: "!", roles: ["OWNER", "MANAGER", "ACCOUNTANT", "ADMIN"] },
+  { href: "/payments", label: "Payments", icon: "₿", roles: ["OWNER", "MANAGER", "ACCOUNTANT", "ADMIN"] },
+  { href: "/commissions", label: "Commissions", icon: "%", roles: ["OWNER", "MANAGER", "ACCOUNTANT", "ADMIN"] },
+
+  // Project management sections
+  { href: "/inventory", label: "Units", icon: "▦", roles: ["OWNER", "MANAGER", "ADMIN"] },
+  { href: "/reservations", label: "Reservations", icon: "◷", roles: ["OWNER", "MANAGER", "AGENT", "ADMIN"] },
+  { href: "/deals", label: "Sales", icon: "★", roles: ["OWNER", "MANAGER", "AGENT", "ACCOUNTANT", "ADMIN"] },
+  { href: "/clients", label: "Clients & files", icon: "▤", roles: ["OWNER", "MANAGER", "AGENT", "ADMIN"] },
+
+  // Management sections (Owner/Manager only)
   { href: "/team", label: "Sales team", icon: "♟", roles: ["OWNER", "MANAGER"] },
-  { href: "/inventory/overview", label: "Inventory overview", icon: "▧" },
+  { href: "/inventory/overview", label: "Inventory overview", icon: "▧", roles: ["OWNER", "MANAGER", "ADMIN"] },
   { href: "/targets", label: "Targets", icon: "◎", roles: ["OWNER", "MANAGER"] },
-  { href: "/approvals", label: "Price approvals", icon: "✓", roles: ["OWNER", "MANAGER"] },
+  { href: "/approvals", label: "Price approvals", icon: "✓", roles: ["OWNER", "MANAGER", "ADMIN"] },
+
+  // Admin-only sections
   { href: "/settings", label: "Settings", icon: "⚙", roles: ["OWNER", "ADMIN"] },
-  { href: "/audit", label: "History", icon: "↺", roles: ["OWNER", "MANAGER", "ADMIN"] },
+  { href: "/audit", label: "History", icon: "↺", roles: ["OWNER", "MANAGER", "ADMIN", "ACCOUNTANT"] },
 ];
 
 const BOTTOM: Record<string, string[]> = {

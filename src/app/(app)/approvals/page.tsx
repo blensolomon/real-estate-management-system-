@@ -1,5 +1,6 @@
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyApprovals } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { MANAGERS } from "@/lib/permissions";
 import { fmtDateTime, money } from "@/lib/format";
 import { discountPct } from "@/lib/approvals";
@@ -7,7 +8,12 @@ import { Badge, Empty, Flash, PageHeader } from "@/components/ui";
 import { decideApproval } from "./actions";
 
 export default async function ApprovalsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string }> }) {
-  const s = await requireSession(MANAGERS);
+  // Guard: Check if user has permission to approve prices
+  await guardCompanyApprovals();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const include = { requestedBy: true, decidedBy: true, reservation: { include: { unit: { include: { project: true } }, client: true } } } as const;
   const [pending, recent, company] = await Promise.all([

@@ -1,11 +1,17 @@
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyAuditLog } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { AUDITORS } from "@/lib/permissions";
 import { fmtDateTime } from "@/lib/format";
 import { PageHeader } from "@/components/ui";
 
 export default async function AuditPage() {
-  const s = await requireSession(AUDITORS);
+  // Guard: Check if user has permission to view audit log
+  await guardCompanyAuditLog();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const logs = await db.auditLog.findMany({ where: { companyId: s.companyId }, include: { user: true }, orderBy: { createdAt: "desc" }, take: 300 });
   return (
     <div>

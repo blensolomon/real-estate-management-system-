@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyTeam } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { MANAGERS } from "@/lib/permissions";
 import { money } from "@/lib/format";
 import { lastMonths, monthOf } from "@/lib/months";
@@ -8,7 +9,12 @@ import { Badge, Empty, PageHeader } from "@/components/ui";
 
 /** Sales team this month: leads, visits, sales against target, and overdue tasks per agent. */
 export default async function TeamPage({ searchParams }: { searchParams: Promise<{ m?: string }> }) {
-  const s = await requireSession(MANAGERS);
+  // Guard: Check if user has permission to view team
+  await guardCompanyTeam();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const now = new Date();
   const months = lastMonths(6, s.calendar, now);

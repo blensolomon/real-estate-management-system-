@@ -10,11 +10,12 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import type { ActivityType, LeadSource, LeadStatus, TaskType, VisitOutcome } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireSession, type Session } from "@/lib/session";
+import { getSession, type Session } from "@/lib/session";
 import { audit } from "@/lib/audit";
 import { back, num, str } from "@/lib/actions-util";
-import { canManage, seesAll, SALES, MANAGERS } from "@/lib/permissions";
+import { canManage, seesAll } from "@/lib/permissions";
 import { addDays, parseDateInput } from "@/lib/format";
+import { guardCompanyAction, logCompanyAudit } from "@/lib/permission-guards";
 
 async function loadLead(s: Session, id: string) {
   const lead = await db.lead.findFirst({ where: { id, companyId: s.companyId } });
@@ -23,7 +24,12 @@ async function loadLead(s: Session, id: string) {
 }
 
 export async function createLead(fd: FormData) {
-  const s = await requireSession(SALES);
+  // Guard: Check permission to create leads
+  const guard = await guardCompanyAction("CREATE_LEAD");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const phone = str(fd, "phone").replace(/\s+/g, "");
   const name = str(fd, "name");
   if (!name || !phone) back("/leads/new", { error: "Name and phone are required" });
@@ -62,12 +68,21 @@ export async function createLead(fd: FormData) {
   });
   if (ownerId !== s.userId)
     await notify(db, { companyId: s.companyId, userId: ownerId, kind: "lead.assigned", title: `New lead assigned to you: ${name}`, link: `/leads/${lead.id}` });
+  
+  // Audit log
+  await logCompanyAudit(s.companyId, s.userId, "CREATE_LEAD", "Lead", lead.id, `Created lead: ${name}`);
   await audit(s, "lead.created", "Lead", lead.id, `${name} (${lead.source})`);
+  
   redirect(`/leads/${lead.id}?msg=Lead created`);
 }
 
 export async function logActivity(fd: FormData) {
-  const s = await requireSession(SALES);
+  // Guard: Check permission (same as create/edit)
+  const guard = await guardCompanyAction("EDIT_LEAD");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const lead = await loadLead(s, str(fd, "leadId"));
   const type = str(fd, "type") as ActivityType;
   const note = str(fd, "note");
@@ -92,6 +107,10 @@ export async function logActivity(fd: FormData) {
       });
     }
   });
+  
+  // Audit log
+  await logCompanyAudit(s.companyId, s.userId, "EDIT_LEAD", "Lead", lead.id, `Logged activity: ${type}`);
+  
   revalidatePath(`/leads/${lead.id}`);
   back(`/leads/${lead.id}`, {
     msg: type === "SITE_VISIT" ? `Site visit logged; follow-up scheduled in ${company.followUpDays} days` : "Activity logged",
@@ -99,7 +118,12 @@ export async function logActivity(fd: FormData) {
 }
 
 export async function reassignLead(fd: FormData) {
-  const s = await requireSession(MANAGERS);
+  // Guard: Check permission to assign leads
+  const guard = await guardCompanyAction("ASSIGN_LEAD");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const leadId = str(fd, "leadId");
   let name = "";
   try {
@@ -108,11 +132,20 @@ export async function reassignLead(fd: FormData) {
     if (e instanceof RuleError) back(`/leads/${leadId}`, { error: e.message });
     throw e;
   }
+  
+  // Audit log
+  await logCompanyAudit(s.companyId, s.userId, "ASSIGN_LEAD", "Lead", leadId, `Assigned to ${name}`);
+  
   back(`/leads/${leadId}`, { msg: `Lead now belongs to ${name}` });
 }
 
 export async function scheduleFollowUp(fd: FormData) {
-  const s = await requireSession(SALES);
+  // Guard: Check permission to edit leads (includes scheduling follow-ups)
+  const guard = await guardCompanyAction("EDIT_LEAD");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const leadId = str(fd, "leadId");
   const dueAt = parseDateInput(str(fd, "dueAt"));
   if (!dueAt) back(`/leads/${leadId}`, { error: "Pick a date" });
@@ -123,11 +156,20 @@ export async function scheduleFollowUp(fd: FormData) {
     if (e instanceof RuleError) back(`/leads/${leadId}`, { error: e.message });
     throw e;
   }
+  
+  // Audit log
+  await logCompanyAudit(s.companyId, s.userId, "EDIT_LEAD", "Lead", leadId, `Scheduled follow-up: ${type}`);
+  
   back(`/leads/${leadId}`, { msg: type === "SITE_VISIT" ? "Site visit scheduled" : "Task scheduled" });
 }
 
 export async function completeFollowUp(fd: FormData) {
-  const s = await requireSession(SALES);
+  // Guard: Check permission to edit leads
+  const guard = await guardCompanyAction("EDIT_LEAD");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const returnTo = str(fd, "returnTo") || "/follow-ups";
   let msg = "Task completed";
   try {
@@ -137,18 +179,32 @@ export async function completeFollowUp(fd: FormData) {
     if (e instanceof RuleError) back(returnTo, { error: e.message });
     throw e;
   }
+  
+  // Audit log
+  await logCompanyAudit(s.companyId, s.userId, "EDIT_LEAD", "Lead", str(fd, "id"), `Completed follow-up`);
+  
   back(returnTo, { msg });
 }
 
 export async function moveStage(fd: FormData) {
-  const s = await requireSession(SALES);
+  // Guard: Check permission to edit leads
+  const guard = await guardCompanyAction("EDIT_LEAD");
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const returnTo = str(fd, "returnTo") || "/pipeline";
+  const leadId = str(fd, "leadId");
   try {
-    await moveLeadStage(s, str(fd, "leadId"), str(fd, "stage") as LeadStatus, str(fd, "reason"));
+    await moveLeadStage(s, leadId, str(fd, "stage") as LeadStatus, str(fd, "reason"));
   } catch (e) {
     if (e instanceof RuleError) back(returnTo, { error: e.message });
     throw e;
   }
+  
+  // Audit log
+  await logCompanyAudit(s.companyId, s.userId, "EDIT_LEAD", "Lead", leadId, `Moved to stage: ${str(fd, "stage")}`);
+  
   revalidatePath("/pipeline");
   back(returnTo, { msg: "Stage updated" });
 }

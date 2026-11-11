@@ -1,7 +1,8 @@
 import Link from "next/link";
 import type { Prisma } from "@prisma/client";
 import { db } from "@/lib/db";
-import { requireSession } from "@/lib/session";
+import { guardCompanyPayments } from "@/lib/route-guards";
+import { getSession } from "@/lib/session";
 import { FINANCE_VIEW } from "@/lib/permissions";
 import { ExportButtons } from "@/components/ExportButtons";
 import { canConfirmPayments, seesAll } from "@/lib/permissions";
@@ -13,7 +14,12 @@ import { reviewPayment } from "../deals/actions";
 import { confirmDepositAction } from "../reservations/actions";
 
 export default async function PaymentsPage({ searchParams }: { searchParams: Promise<{ msg?: string; error?: string; status?: string; q?: string }> }) {
-  const s = await requireSession(FINANCE_VIEW);
+  // Guard: Check if user has permission to view payments
+  await guardCompanyPayments();
+  
+  const s = await getSession();
+  if (!s) throw new Error("Session not found");
+  
   const sp = await searchParams;
   const status = sp.status ?? "PENDING";
   const where: Prisma.PaymentWhereInput = { companyId: s.companyId, ...(status !== "ALL" ? { status: status as never } : {}) };
